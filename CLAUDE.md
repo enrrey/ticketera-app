@@ -41,7 +41,7 @@ Tests run on **Vitest + React Testing Library** (jsdom), configured in `vitest.c
 - Shared, domain-less code lives in `src/components/ui/` (shadcn), `src/lib/` (e.g. `cn()`), `src/hooks/` — matching the aliases in `components.json`.
 - SOLID, DRY, KISS and YAGNI apply to everything.
 
-Codebase is still a bare `create-next-app` scaffold (`src/app/layout.tsx`, `src/app/page.tsx`); `src/modules/` appears as soon as the first feature lands.
+Current modules under `src/modules/`: `events` (catalog, event CRUD, ticket types, organizer UI), `identity-access` (Clerk auth, roles/permissions, staff management and invitations), `payments` (Stripe webhook inbox only — no charges yet) and `portal` (login and still-demo "mis entradas"). Persistence is PostgreSQL via Drizzle (`src/lib/db/schema.ts`, migrations in `drizzle/`, docs in `docs/architecture/`). Checkout, tickets/QR, check-in, refunds, promotions and settlements are not built yet.
 
 ### Reuse before creating (mandatory)
 
