@@ -120,6 +120,7 @@ export const orders = pgTable("order", {
   status: text("status").default("pending").notNull(), currency: currency(),
   subtotalCents: integer("subtotal_cents").notNull(), discountCents: integer("discount_cents").default(0).notNull(),
   totalCents: integer("total_cents").notNull(), stripeCustomerId: text("stripe_customer_id"),
+  accessTokenHash: text("access_token_hash").unique(),
   createdAt: created(), updatedAt: time("updated_at").defaultNow().notNull(),
 }, (t) => [index("order_user_idx").on(t.userId), index("order_guest_email_idx").on(t.buyerEmail).where(sql`${t.userId} is null`), index("order_status_created_idx").on(t.status, t.createdAt), check("order_totals_check", sql`${t.subtotalCents} >= 0 and ${t.discountCents} >= 0 and ${t.discountCents} <= ${t.subtotalCents} and ${t.totalCents} = ${t.subtotalCents} - ${t.discountCents} and ${t.currency} = 'pen'`), check("order_status_check", sql`${t.status} in ('pending', 'paid', 'expired', 'cancelled', 'partially_refunded', 'refunded')`)]);
 
