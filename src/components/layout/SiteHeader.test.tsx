@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { SiteHeader } from "@/components/layout/SiteHeader";
+import type { ReactNode } from "react";
+
+vi.mock("@clerk/nextjs", () => ({
+  Show: ({ when, children }: { when: string; children: ReactNode }) => when === "signed-out" ? children : null,
+  UserButton: () => null,
+}));
 
 describe("SiteHeader", () => {
   it("calls onSearchChange with the typed value", async () => {
