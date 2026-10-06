@@ -1,0 +1,70 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { EventEditorSheet } from "./EventEditorSheet";
+const fetchMock=vi.fn();
+const detail={ id:"id",slug:"event",organizerId:"owner",name:"Evento real",category:"concert",description:"Descripción",imageUrl:"",venueName:"Local",address:"Av. Real 123",city:"Lima",status:"draft",hasOrders:false,sessions:[{startsAt:"2030-01-01T20:00:00Z",endsAt:"2030-01-01T23:00:00Z"}] };
+beforeEach(()=>{ fetchMock.mockReset(); vi.stubGlobal("fetch",fetchMock); });
+afterEach(()=>vi.unstubAllGlobals());
+it("creates a real draft with Peru session times and refreshes on success",async()=>{
+  const saved=vi.fn(); fetchMock.mockResolvedValue(Response.json({ slug:"new-event" },{status:201}));
+  render(<EventEditorSheet mode="create" canPublish={false} onClose={vi.fn()} onSaved={saved} />);
+  fireEvent.change(screen.getByLabelText("Nombre"),{target:{value:"Evento nuevo"}});
+  fireEvent.change(screen.getByLabelText("Descripción"),{target:{value:"Descripción real"}});
+  fireEvent.change(screen.getByLabelText("Recinto"),{target:{value:"Local real"}});
+  fireEvent.change(screen.getByLabelText("Dirección"),{target:{value:"Av. Real 123"}});
+  fireEvent.change(screen.getByLabelText("Inicio"),{target:{value:"2030-01-01T20:00"}});
+  fireEvent.change(screen.getByLabelText("Fin"),{target:{value:"2030-01-01T23:00"}});
+  await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
+  await waitFor(()=>expect(saved).toHaveBeenCalledWith("Evento creado como borrador"));
+  const [url,options]=fetchMock.mock.calls[0]; expect(url).toBe("/api/events"); expect(options.method).toBe("POST");
+  expect(JSON.parse(options.body)).toMatchObject({status:"draft",sessions:[{startsAt:"2030-01-02T01:00:00.000Z",endsAt:"2030-01-02T04:00:00.000Z"}]});
+  expect(JSON.parse(options.body)).not.toHaveProperty("organizerId");
+});
+it("loads details read-only and hides publication without the permission",async()=>{
+  fetchMock.mockResolvedValue(Response.json(detail));
+  render(<EventEditorSheet mode="view" slug="event" canPublish={false} onClose={vi.fn()} onSaved={vi.fn()} />);
+  await screen.findByDisplayValue("Evento real"); expect(screen.getByLabelText("Nombre")).toBeDisabled();
+  expect(screen.queryByRole("option",{name:"Publicado"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"Guardar evento"})).not.toBeInTheDocument();
+});
+it("edits saved event metadata and displays server security failures",async()=>{
+  fetchMock.mockResolvedValueOnce(Response.json(detail)).mockResolvedValueOnce(Response.json({error:"No tienes permiso"},{status:403}));
+  render(<EventEditorSheet mode="edit" slug="event" canPublish={true} onClose={vi.fn()} onSaved={vi.fn()} />);
+  await screen.findByDisplayValue("Evento real"); fireEvent.change(screen.getByLabelText("Nombre"),{target:{value:"Nuevo nombre"}});
+  await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("No tienes permiso");
+  expect(fetchMock.mock.calls[1][1].method).toBe("PATCH");
+});
+it("requires confirmation before deleting a draft",async()=>{
+  const saved=vi.fn(); fetchMock.mockResolvedValueOnce(Response.json(detail)).mockResolvedValueOnce(new Response(null,{status:204}));
+  render(<EventEditorSheet mode="delete" slug="event" canPublish={true} onClose={vi.fn()} onSaved={saved} />);
+  await screen.findByText(/¿Eliminar el borrador/); expect(fetchMock).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByRole("button",{name:"Eliminar borrador"}));
+  await waitFor(()=>expect(saved).toHaveBeenCalledWith("Borrador eliminado")); expect(fetchMock.mock.calls[1][1].method).toBe("DELETE");
+});
+it("submits editable cover, zone prices, space type, capacity and session validity",async()=>{
+  const saved=vi.fn();fetchMock.mockResolvedValueOnce(Response.json(detail)).mockResolvedValueOnce(Response.json({slug:"event"}));
+  render(<EventEditorSheet mode="edit" slug="event" canPublish={true} onClose={vi.fn()} onSaved={saved}/>);
+  await screen.findByDisplayValue("Evento real");
+  fireEvent.change(screen.getByLabelText("Imagen de portada"),{target:{value:"https://cdn.example.com/cover.jpg"}});
+  await userEvent.click(screen.getByRole("button",{name:"Añadir tipo de entrada"}));
+  fireEvent.change(screen.getByLabelText("Nombre de entrada 1"),{target:{value:"VIP"}});
+  fireEvent.change(screen.getByLabelText("Zona de entrada 1"),{target:{value:"Platea"}});
+  fireEvent.change(screen.getByLabelText("Precio de entrada 1"),{target:{value:"125.50"}});
+  fireEvent.change(screen.getByLabelText("Cantidad de entrada 1"),{target:{value:"75"}});
+  fireEvent.change(screen.getByLabelText("Modalidad de entrada 1"),{target:{value:"box"}});
+  fireEvent.change(screen.getByLabelText("Personas por espacio 1"),{target:{value:"4"}});
+  await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
+  await waitFor(()=>expect(saved).toHaveBeenCalled());
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({imageUrl:"https://cdn.example.com/cover.jpg",ticketTypes:[{name:"VIP",zone:"Platea",priceCents:12550,capacity:75,seatingType:"box",peoplePerUnit:4,sessionIndexes:[0]}]});
+});
+it("updates only the cover when purchases freeze the other event data",async()=>{
+  fetchMock.mockResolvedValueOnce(Response.json({...detail,hasOrders:true})).mockResolvedValueOnce(Response.json({slug:"event"}));
+  render(<EventEditorSheet mode="edit" slug="event" canPublish={true} onClose={vi.fn()} onSaved={vi.fn()}/>);
+  await screen.findByDisplayValue("Evento real");expect(screen.getByLabelText("Nombre")).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Imagen de portada"),{target:{value:"https://cdn.example.com/new-cover.jpg"}});
+  await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
+  await waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({imageUrl:"https://cdn.example.com/new-cover.jpg"});
+});

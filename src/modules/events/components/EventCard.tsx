@@ -1,6 +1,7 @@
 "use client";
 
-import Image from "next/image";
+import { EventImage as Image } from "./EventImage";
+import Link from "next/link";
 import { ArrowUpRight, Heart, MapPin } from "lucide-react";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { getEventDateParts } from "@/lib/formatEventDate";
@@ -24,11 +25,11 @@ export function EventCard({ event, saved = false, onToggleSaved }: EventCardProp
       <div className="event-info">
         <div className="event-topline"><span>{event.genre ?? CATEGORY_META[event.category].label}</span><span>{event.city}</span></div>
         <div className="event-title-row">
-          <div><h3>{event.ticketUrl ? <a href={event.ticketUrl} target="_blank" rel="noopener noreferrer">{event.title}<span className="sr-only"> (venta oficial, abre otra pestaña)</span></a> : event.title}</h3><p className="event-tour">{event.tour}</p></div>
+          <div><h3><Link href={`/eventos/${event.id}`}>{event.title}</Link></h3><p className="event-tour">{event.tour}</p></div>
           {date && <time dateTime={event.date} className="date-badge" data-testid="event-date-badge"><strong>{date.day}{event.endDate && <small>–{getEventDateParts(event.endDate)?.day}</small>}</strong><span>{date.month}</span></time>}
         </div>
         <p className="event-venue"><MapPin size={13} aria-hidden="true" />{event.venue}, {event.city}</p>
-        <div className="event-bottom"><span>{event.price != null ? <>Desde <strong>{formatCurrency(event.price, event.currency)}</strong></> : "Precios en la web oficial"}</span>{event.ticketUrl && <a href={event.ticketUrl} target="_blank" rel="noopener noreferrer" aria-label={`Ver entradas de ${event.title} en Teleticket (abre otra pestaña)`}>Ver entradas <ArrowUpRight size={15} /></a>}</div>
+        <div className="event-bottom"><span>{event.price != null ? <>Desde <strong>{formatCurrency(event.price, event.currency)}</strong></> : "Explora zonas y precios"}</span><Link href={`/eventos/${event.id}`} aria-label={`Ver detalles y entradas de ${event.title}`}>Ver entradas <ArrowUpRight size={15} /></Link></div>
       </div>
     </article>
   );

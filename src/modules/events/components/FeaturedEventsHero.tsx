@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
+import { EventImage as Image } from "./EventImage";
 import { ArrowDown, ArrowUpRight, AudioLines, MapPin, Pause, Play } from "lucide-react";
 import type { Event } from "../types";
 
 export function FeaturedEventsHero({ events }: { events: Event[] }) {
   const [paused, setPaused] = useState(false);
-  const artists = events.filter((event) => event.city === "Lima").slice(0, 8);
+  const artists = events.filter((event) => event.featured);
   const columns = [artists.filter((_, i) => i % 2 === 0), artists.filter((_, i) => i % 2 !== 0)];
 
   return (
@@ -20,7 +20,7 @@ export function FeaturedEventsHero({ events }: { events: Event[] }) {
           <h1>No es lo mismo<br />escucharlo.<br /><span>Que vivirlo.</span></h1>
           <p className="immersive-description">La piel de gallina. Tu canción a todo volumen.<br className="desktop-break" /> Ese momento en el que todo lo demás desaparece.</p>
           <div className="immersive-actions"><a href="#explorar" className="button button-coral">Encuentra tu concierto <ArrowUpRight size={20} /></a><a href="#destacados" className="hero-secondary">Ver destacados <ArrowDown size={17} /></a></div>
-          <div className="hero-location"><MapPin size={15} /><span>Lima & Arequipa</span><i /><span>Oct — Dic 2026</span></div>
+          <div className="hero-location"><MapPin size={15} /><span>{[...new Set(events.map((event)=>event.city))].join(" · ") || "Perú"}</span><i /><span>Agenda de eventos</span></div>
           <div className="hero-edition"><AudioLines size={24} /><span>TU PRÓXIMA GRAN HISTORIA<br /><strong>EMPIEZA FRENTE A UN ESCENARIO.</strong></span></div>
         </div>
         <div className="artist-wall" aria-hidden="true">
@@ -46,4 +46,5 @@ export function FeaturedEventsHero({ events }: { events: Event[] }) {
     </section>
   );
 }
+
 

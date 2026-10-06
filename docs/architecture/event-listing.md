@@ -1,0 +1,9 @@
+# Listado y resumen de eventos
+
+`useEvents(initialEvents?, { scope, userId })` consulta `/api/events`. El catálogo usa `public` y recibe solamente eventos publicados. El panel `/organizador` usa `organizer` y muestra todos los estados de los eventos propios. La clave de React Query separa ambos ámbitos y cada identidad de Clerk; al cerrar sesión se ocultan datos privados. Los errores de API se muestran sin sustituirlos por datos ficticios.
+
+La API verifica la identidad canónica de Clerk, cuenta activa, rol organizer/admin/super_admin y permiso `events.manage`. Los organizadores solo ven sus propios eventos; admin/super_admin puede gestionar la plataforma completa. El identificador procede exclusivamente de la sesión: no acepta filtros de otro usuario. Las respuestas son privadas y no se almacenan en caché HTTP.
+
+Las entradas emitidas incluyen estados valid, used y refund_pending, excluyendo cancelled/refunded. Los ingresos netos suman pagos succeeded/partially_refunded/refunded y restan únicamente reembolsos succeeded. Para pedidos que incluyen varios eventos, el importe neto se distribuye proporcionalmente según el total descontado de cada línea; se redondea a céntimos por evento. Es un resumen de ingresos cobrados, antes de comisiones y liquidaciones. Un evento publicado se cuenta por estado persisted published, sin inferirlo del número de ventas.
+
+La importación manual conserva el catálogo mock como fuente exclusiva del seed; ese catálogo no es el respaldo automático de consultas reales. La página pública de detalle verifica igualmente el estado publicado y muestra las zonas, tarifas, capacidades configuradas, modalidades, sesiones, ventanas de venta y condiciones reales. La capacidad configurada no se presenta como disponibilidad restante. La compra aún no está habilitada para estos eventos; el prototipo de compra permanece limitado a fixtures sin configuración persistida.

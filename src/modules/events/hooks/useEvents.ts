@@ -1,18 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { getEvents } from "../services/eventsService";
 import type { Event } from "../types";
 
-/**
- * Thin `useQuery` wrapper around `eventsService.getEvents`. Contains no
- * branching logic of its own: loading/error/data states are exposed as-is
- * from React Query for consumers (e.g. `EventsGrid`) to handle.
- */
-export function useEvents(initialEvents?: Event[]) {
+/** Shared real-event query; authorization and ownership are enforced by the API. */
+export function useEvents(initialEvents?: Event[], options: { scope?: "public" | "organizer"; userId?: string | null } = {}) {
+  const scope = options.scope ?? "public";
   return useQuery({
-    queryKey: ["events"],
-    queryFn: getEvents,
-    initialData: initialEvents,
-    staleTime: Infinity,
+    queryKey: ["events", scope, scope === "organizer" ? options.userId : "public"],
+    queryFn: async (): Promise<Event[]> => {
+      const response = await fetch(`/api/events?scope=${scope}`, { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) throw new Error("No pudimos cargar los eventos");
+      return response.json();
+    },
+    enabled: scope === "public" || Boolean(options.userId),
+    initialData: scope === "public" ? initialEvents : undefined,
+    staleTime: scope === "public" ? 30_000 : 0,
+    gcTime: scope === "public" ? 300_000 : 0,
+    retry: false,
   });
 }

@@ -4,6 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getEvents } from "../services/eventsService";
 import { EventsLandingPage } from "./EventsLandingPage";
+import type { ReactNode } from "react";
+
+vi.mock("@clerk/nextjs", () => ({
+  Show: ({ when, children }: { when: string; children: ReactNode }) => when === "signed-out" ? children : null,
+  UserButton: () => null,
+}));
 
 async function renderPage() {
   const events = await getEvents();
@@ -42,9 +48,8 @@ describe("concert discovery", () => {
     await user.click(screen.getByRole("button", { name: "Mi selección, 1 eventos" }));
     const catalog = within(screen.getByTestId("events-grid-section"));
     expect(catalog.getAllByRole("article")).toHaveLength(1);
-    const link = catalog.getByRole("link", { name: /Ver entradas de Zayn/ });
-    expect(link).toHaveAttribute("href", "https://teleticket.com.pe/zayn");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    const link = catalog.getByRole("link", { name: /Ver detalles y entradas de Zayn/ });
+    expect(link).toHaveAttribute("href", "/eventos/zayn");
     await user.click(catalog.getByRole("button", { name: "Quitar Zayn" }));
     expect(catalog.queryAllByRole("article")).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Mi selección, 0 eventos" })).toBeInTheDocument();

@@ -1,3 +1,5 @@
+import type { TicketTypeInput } from "./eventManagement.types";
+export type PublicTicketOption=Omit<TicketTypeInput,"sessionIndexes">&{id:string;sessionDates:string[]};
 export type EventCategory =
   | "concert"
   | "theater"
@@ -28,4 +30,11 @@ export interface Event {
   heroImageUrl?: string;
   endDate?: string;
   verifiedAt?: string;
+  status?: string;
+  ticketsIssued?: number;
+  netRevenueCents?: number;
+  ticketOptions?:PublicTicketOption[];
+  minimumAge?:number;
+  entryInstructions?:string;
+  description?:string;
 }
