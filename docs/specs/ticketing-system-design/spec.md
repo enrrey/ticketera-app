@@ -1,6 +1,7 @@
 # System Design — Arquitectura y MER de Ticketera
 
-> **Estado:** PENDIENTE DE APROBACIÓN DEL DOCUMENTO  
+> **Estado:** APROBADO  
+> **Aprobado por:** Usuario (ronaldreyesramirez@gmail.com), 2026-10-05, incluyendo las decisiones de §9.1.  
 > **Autorización de implementación parcial:** el usuario aprobó usar este MER y elegir ORM con «ok procede» para crear tablas, relaciones, índices y recepción de webhooks Stripe. El resto de decisiones pendientes conserva su estado.
 > **Tipo de trabajo:** diseño de sistema y modelo de datos; no implementar en esta etapa.  
 > **Propósito:** dejar una fuente de verdad para que una sesión futura pueda continuar el diseño técnico y, después de aprobar esta especificación, preparar el plan de implementación.
@@ -289,6 +290,25 @@ Resolver o documentar estas decisiones antes de implementar los flujos afectados
 11. Confirmar si el mapa de zonas referencial se reemplaza por un plano por evento/sede y si habrá asientos numerados.
 
 Los puntos pendientes no invalidan el límite arquitectónico de monolito modular; son decisiones de producto/diseño físico que conviene cerrar antes de escribir migraciones y conectar proveedores.
+
+### 9.1 Decisiones resueltas (2026-10-05)
+
+Respondidas por el usuario (ronaldreyesramirez@gmail.com); numeración de la lista anterior.
+
+| # | Decisión |
+| --- | --- |
+| 5 | **Resuelto antes:** el primer Super admin se fija por bootstrap con el correo verificado designado (`identity-access`). |
+| 10 | **Resuelto antes:** ORM Drizzle + node-postgres, migraciones SQL versionadas en `drizzle/`. |
+| 3 | Correo transaccional: **Resend**. |
+| 4 | Región GCP: **southamerica-east1 (São Paulo)** para Cloud Run y Cloud SQL. Backups con recuperación a un punto en el tiempo habilitados; la política de retención concreta se fija al preparar el despliegue. |
+| 6 | Liquidación **por evento**, iniciada manualmente por un Administrador una vez realizado. **Sin comisión de plataforma por ahora** (se definirá después sin bloquear el MVP). |
+| 7 | El límite de compra es **configurable por tipo de entrada** (el campo de límite por pedido ya existente); no hay tope global fijo. El 6 de la UI demo deja de ser regla. |
+| 8 | Un reembolso **devuelve el cupo a la venta** mientras la ventana de venta del tipo siga abierta. |
+| 9 | Publicar exige tipos de entrada con ventas vigentes que cubran todas las sesiones y dirección confirmada (lo que ya valida el CRUD). **Stripe Connect verificado no bloquea publicar**; solo condiciona liquidar. Sin aprobación previa de un administrador. |
+| 11 | **Zonas con cupo, sin asignación individual de asiento** (de pie, asiento libre, mesa/box). Los asientos numerados permanecen solo como configuración; no hay plano ni elección de asiento. |
+| — | **Sin cargos de servicio** al comprador: paga solo el precio de la entrada. |
+
+Pendiente de la lista original: 1 (aprobación del documento) y 2 (artifact/capturas de Claude, no accesible).
 
 ## 10. Handoff para una sesión futura
 
