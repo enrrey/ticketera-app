@@ -1,6 +1,7 @@
 # System Design — Arquitectura y MER de Ticketera
 
 > **Estado:** PENDIENTE DE APROBACIÓN DEL DOCUMENTO  
+> **Autorización de implementación parcial:** el usuario aprobó usar este MER y elegir ORM con «ok procede» para crear tablas, relaciones, índices y recepción de webhooks Stripe. El resto de decisiones pendientes conserva su estado.
 > **Tipo de trabajo:** diseño de sistema y modelo de datos; no implementar en esta etapa.  
 > **Propósito:** dejar una fuente de verdad para que una sesión futura pueda continuar el diseño técnico y, después de aprobar esta especificación, preparar el plan de implementación.
 
@@ -38,7 +39,7 @@ El artifact de Claude compartido por el usuario no estuvo accesible desde las he
 | Desarrollo | PostgreSQL accesible localmente (`localhost`). |
 | Producción | Google Cloud Platform; Cloud Run propuesto para Next.js y Cloud SQL for PostgreSQL para datos. |
 | País, moneda y hora | Perú; PEN; zona horaria `America/Lima`. |
-| Autenticación | Clerk con correo/contraseña y Google. |
+| Autenticación | Clerk con correo/contraseña e inicio de sesión con Google (OAuth/OIDC). Google autentica la identidad; Clerk gestiona las cuentas y sesiones; PostgreSQL conserva el perfil y los roles del negocio. |
 | Roles | Super admin, Administrador, Organizador de eventos y Cliente. Son roles globales. El Super admin es el único que asigna o retira los roles privilegiados de Administrador y Organizador. |
 | Responsable de ingresos | Cada evento tiene un Organizador responsable para atribuir ventas y liquidaciones. Esa relación financiera no limita el alcance global del rol Organizador. |
 | Eventos | Presenciales por ahora; un evento puede incluir varias fechas/sesiones. |
@@ -89,6 +90,8 @@ flowchart LR
   Customer[Cliente o invitado] --> Web[Next.js modular<br/>Cloud Run]
   Staff[Administrador u Organizador] --> Web
   Web <--> Clerk[Clerk<br/>identidad]
+  Clerk <--> GoogleAuth[Google<br/>OAuth/OIDC]
+  Clerk -->|webhooks firmados de usuario| Web
   Web --> DB[(PostgreSQL local<br/>Cloud SQL en producción)]
   Web <--> Stripe[Stripe central<br/>Stripe Connect]
   Stripe -->|webhooks firmados| Web
@@ -103,7 +106,7 @@ Next.js App Router sirve páginas, rutas servidoras y operaciones de negocio. La
 
 Dominios propuestos:
 
-1. `identity-access`: perfil local vinculado a Clerk, roles y autorización.
+1. `identity-access`: acceso con Google o correo/contraseña mediante Clerk, sincronización del perfil local, roles y autorización. No implementa un servidor OAuth propio.
 2. `events`: eventos, organizador responsable, sedes y sesiones.
 3. `ticketing`: tipos de entrada, validez por sesión, cupos y pases.
 4. `promotions`: ofertas automáticas y códigos promocionales.
@@ -124,6 +127,14 @@ Una única base PostgreSQL da transacciones consistentes para los flujos que com
 
 No copiar datos personales de producción a local. La región de GCP y las políticas de retención se deciden antes del despliegue productivo.
 
+### 5.4 Identidad con Google
+
+Google es el proveedor de identidad y Clerk administra la conexión social, el retorno OAuth y la sesión de la aplicación. Next.js valida la sesión Clerk en servidor antes de resolver el perfil local y autorizar operaciones. El navegador no puede asignar roles ni acreditar por sí mismo que un correo está verificado.
+
+Habilitar la conexión Google en Clerk de desarrollo y configurar credenciales OAuth propias para producción, con los dominios y URI de retorno que indique Clerk. Mantener credenciales separadas entre ambientes y el secreto de Google en la configuración segura del proveedor, nunca en el frontend. Solicitar solo identidad básica (`openid`, `email`, `profile`); no se requiere acceso a Drive, Calendar ni otros servicios de Google. Referencia: [conexión Google en Clerk](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/google).
+
+La aplicación no guarda contraseñas, tokens OAuth de Google ni sesiones en PostgreSQL. Las identidades externas permanecen en Clerk; no hace falta agregar una tabla local de cuentas Google para este alcance. Los métodos de acceso pueden coexistir sobre un mismo usuario Clerk y un único perfil de negocio.
+
 ## 6. Flujos críticos
 
 ### 6.1 Crear y publicar evento
@@ -143,7 +154,7 @@ Los estados de evento (`draft`, `published`, `cancelled`, `completed`) son una p
 4. Stripe notifica el resultado por webhook verificado. Cada `stripe_event_id` se procesa como máximo una vez.
 5. Pago completado dentro del plazo: orden pagada, reserva convertida en venta, un ticket por unidad, token QR único y envío de confirmación.
 6. Pago no completado: al expirar la reserva se libera el cupo. Si el pago se completó después de expirar, reembolso automático y sin emisión de tickets.
-7. Si el comprador se registró como invitado, Clerk vincula la orden cuando el correo de la cuenta esté verificado y coincida con el correo comprador.
+7. Si el comprador compró como invitado, el backend de la aplicación vincula la orden cuando un correo de la cuenta esté verificado en Clerk y coincida con el correo comprador; esto también aplica al acceso con Google. Clerk acredita la identidad, pero no modifica las órdenes de PostgreSQL.
 
 La implementación debe evitar sobreventa bajo compras simultáneas. El cupo disponible se calcula descontando tickets emitidos y reservas activas no expiradas; la mutación final se protege dentro de una transacción PostgreSQL.
 
@@ -167,6 +178,16 @@ La implementación debe evitar sobreventa bajo compras simultáneas. El cupo dis
 - Registrar la cuenta Connect verificada del Organizador responsable.
 - El Administrador configura/inicia la liquidación; registrar importe, evento/periodo, cuenta destino, estado e identificador Stripe.
 - No enviar dos veces una liquidación por reintento: claves idempotentes y conciliación contra Stripe.
+
+### 6.6 Acceso con Google y sincronización del usuario
+
+1. El usuario selecciona «Continuar con Google» en ingreso o registro. Clerk dirige la autenticación a Google y procesa el retorno; si se cancela o falla, no se habilitan operaciones autenticadas.
+2. Una sesión Clerk válida identifica al usuario por `clerk_user_id`. El servidor obtiene de Clerk el perfil y el estado de verificación de sus correos.
+3. `identity-access` crea o actualiza el perfil local mediante un upsert por `clerk_user_id`; una cuenta nueva recibe únicamente el rol `customer`. Repetir el acceso no duplica el usuario ni reemplaza sus roles existentes.
+4. Si ya existe una cuenta de correo/contraseña, Clerk gestiona la vinculación con Google y sus verificaciones. La aplicación no fusiona usuarios locales por una coincidencia de correo. Referencia: [vinculación de cuentas OAuth](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/account-linking).
+5. Tras comprobar un correo verificado desde Clerk, el backend puede reclamar órdenes de invitado con ese correo normalizado y `user_id IS NULL`, en una transacción idempotente. No reasigna órdenes que ya pertenecen a otro usuario, no cambia el correo histórico del comprador y no concede roles por dominio de correo.
+6. Webhooks firmados `user.created`, `user.updated` y `user.deleted` mantienen el perfil local actualizado. Como su entrega es eventualmente consistente, el primer acceso debe resolver el perfil sin depender de que el webhook haya llegado. Procesar duplicados y eventos fuera de orden sin sobrescribir datos más recientes. Referencia: [sincronización de usuarios con webhooks](https://clerk.com/docs/guides/development/webhooks/syncing).
+7. Al eliminar la cuenta en Clerk, desactivar el acceso al perfil local y conservar las referencias necesarias de órdenes, tickets y auditoría conforme a la política de retención pendiente. El historial financiero no se elimina en cascada.
 
 ## 7. MER conceptual
 
@@ -207,7 +228,7 @@ erDiagram
 
 | Entidad | Responsabilidad y datos clave |
 | --- | --- |
-| `user` | Perfil interno; `clerk_user_id` único, correo normalizado/verificado, nombre y timestamps. No replica credenciales. |
+| `user` | Perfil interno: `id` como PK, `clerk_user_id` único y obligatorio, `email` primario normalizado, `email_verified_at` nullable, `name`, `avatar_url` opcional, `status` (`active`/`inactive`), `identity_updated_at`, `created_at` y `updated_at`. No replica credenciales; Google y correo/contraseña usan este mismo perfil. |
 | `role`, `user_role` | Catálogo de roles y asignaciones globales. `customer` es el rol inicial; Super admin administra roles privilegiados. |
 | `venue` | Recinto presencial: nombre, dirección, ciudad, país, coordenadas y `google_place_id` opcional. |
 | `event` | Nombre, descripción, categoría, estado, imagen, sede, responsable Organizador y creador/auditoría. |
@@ -224,7 +245,7 @@ erDiagram
 | `refund`, `refund_ticket` | Reembolso Stripe y sus tickets/importe asociados para soportar reembolsos parciales. |
 | `stripe_account` | Cuenta Connect asociada al Organizador responsable, estado de onboarding/verificación y referencia externa. |
 | `payout` | Liquidación a Organizador/evento/periodo, importe, estado y referencia Stripe. |
-| `webhook_event` | ID proveedor único, tipo, estado de procesamiento, intentos y timestamps; evita efectos duplicados. |
+| `webhook_event` | `provider` (`clerk`/`stripe`), `external_event_id`, tipo, estado de procesamiento, intentos y timestamps; unicidad compuesta `(provider, external_event_id)` para evitar efectos duplicados de ambos proveedores. |
 | `audit_log` | Actor, acción, entidad, ID, fecha y metadatos seguros para roles, eventos, reembolsos y liquidaciones. |
 
 ### 7.2 Reglas de integridad propuestas
@@ -235,6 +256,9 @@ erDiagram
 - Un ticket pertenece a una sola unidad de orden; token QR único y nunca reutilizado.
 - `clerk_user_id`, ID de Stripe, ID de webhook y códigos de promoción deben tener unicidad adecuada.
 - Roles de Administrador/Organizador no se guardan solo en metadatos modificables desde cliente; consultar y autorizar del lado servidor.
+- Todas las FK del negocio referencian `user.id`; `clerk_user_id` es el enlace de identidad estable, no el correo ni un ID Google duplicado. No usar `auth_provider = google` como método exclusivo, porque una cuenta puede tener varios métodos de ingreso.
+- `email_verified_at` refleja la verificación del correo primario actual; al cambiarlo se actualiza o se limpia según Clerk. Para reclamar compras consultar correos verificados vigentes desde Clerk; no confiar únicamente en una copia local potencialmente desactualizada.
+- Normalizar correos de forma consistente sin quitar puntos ni sufijos `+`. Indexar el correo de comprador de `order` para buscar órdenes sin propietario; la actualización debe conservar `user_id IS NULL` como condición ante accesos concurrentes.
 
 ## 8. Seguridad, confiabilidad y operación
 
@@ -281,6 +305,7 @@ Una IA que continúe debe:
 ### Criterios de aceptación de esta documentación
 
 - La arquitectura, MER, roles, servicios externos y flujos críticos están descritos en un único punto de entrada.
+- El diseño incluye Google mediante Clerk, un perfil local por usuario Clerk, acceso repetido sin duplicados, vinculación segura de compras invitadas y conservación de roles al cambiar el método de ingreso.
 - Las decisiones confirmadas se distinguen de prototipos UI, supuestos y pendientes.
 - Una futura sesión puede explicar cómo se crea evento, compra/retiene inventario, confirma pago, emite/valida QR, reembolsa y liquida sin depender del chat.
 - No se ha implementado código de producto ni se han creado recursos externos.

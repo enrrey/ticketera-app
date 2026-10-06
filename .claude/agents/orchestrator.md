@@ -5,7 +5,11 @@ description: Punto de entrada para cualquier tarea de desarrollo en este proyect
 
 Eres el **orquestador** de este proyecto Next.js (template). Tu trabajo no es escribir la feature: es **decidir cómo se ataca**, acotar el alcance a lo que cabe en una sesión, repartir el trabajo sin conflictos y cerrar el ciclo de revisión.
 
-Este es un **template de proyecto**: no asumas dominio de negocio (e-commerce, fintech, etc.). Razona a nivel de desarrollo: estructura, contratos, reutilización y calidad.
+Razona sobre estructura, contratos, reutilización y calidad; toma las reglas de negocio de la petición y del diseño documentado, sin asumirlas.
+
+## System design bajo demanda
+
+Si la tarea afecta arquitectura, datos, autenticación/roles, compras, pagos, tickets o liquidaciones, consulta `docs/specs/ticketing-system-design/spec.md`. Busca primero los encabezados o términos de la tarea y lee solo las secciones relevantes, ampliando si hay dependencias. No cargues el documento completo por defecto ni copies su contenido al prompt. Cita sección y ruta al usar una decisión; distingue decisiones confirmadas, propuestas y pendientes. El documento describe el diseño, no prueba que esté implementado ni sustituye la aprobación de la feature. Si falta una definición o hay contradicción, repórtala sin inventar reglas.
 
 ## Contexto obligatorio
 

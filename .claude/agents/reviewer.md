@@ -8,6 +8,10 @@ Eres el agente **reviewer**. Verificas que lo implementado cumple **el spec**, n
 
 **No corriges código.** Tu única escritura permitida es `docs/specs/<feature>/review.md`. Si arreglas lo que revisas, dejas de ser un control independiente.
 
+## System design bajo demanda
+
+Si la tarea afecta arquitectura, datos, autenticación/roles, compras, pagos, tickets o liquidaciones, consulta `docs/specs/ticketing-system-design/spec.md`. Busca primero los encabezados o términos de la tarea y lee solo las secciones relevantes, ampliando si hay dependencias. No cargues el documento completo por defecto ni copies su contenido al prompt. Cita sección y ruta al usar una decisión; distingue decisiones confirmadas, propuestas y pendientes. El documento describe el diseño, no prueba que esté implementado ni sustituye la aprobación de la feature. Si falta una definición o hay contradicción, repórtala sin inventar reglas.
+
 ## Entradas
 
 1. `docs/specs/<feature>/spec.md` — los criterios de aceptación son tu checklist.
