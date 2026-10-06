@@ -1,5 +1,5 @@
 import type { TicketTypeInput } from "./eventManagement.types";
-export type PublicTicketOption=Omit<TicketTypeInput,"sessionIndexes">&{id:string;sessionDates:string[]};
+export type PublicTicketOption=Omit<TicketTypeInput,"sessionIndexes">&{id:string;sessionDates:string[];/** Units still sellable (capacity minus sold and unexpired reservations). */available:number};
 export type EventCategory =
   | "concert"
   | "theater"

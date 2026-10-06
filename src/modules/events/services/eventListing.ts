@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDatabase } from "@/lib/db";
 import { events, venues } from "@/lib/db/schema";
+import { availableUnitsSql } from "@/modules/checkout/server";
 import { AccessError, getCurrentAccessUser } from "@/modules/identity-access";
 import type { AccessUser } from "@/modules/identity-access";
 import type { Event, EventCategory, PublicTicketOption } from "../types";
@@ -15,7 +16,7 @@ export async function listDatabaseEvents(scope: "public" | "organizer", actor?: 
   const rows = await database.select({
     id: events.slug, title: events.name, category: events.category, imageUrl: events.imageUrl, venue: venues.name, city: venues.city, status: events.status,
     description:events.description,minimumAge:events.minimumAge,entryInstructions:events.entryInstructions,featured:events.featured,
-    ticketOptions:sql<PublicTicketOption[]>`coalesce((select jsonb_agg(jsonb_build_object('id',tt.id,'name',tt.name,'zone',tt.zone,'seatingType',tt.seating_type,'description',tt.description,'priceCents',tt.price_cents,'capacity',tt.capacity,'maxPerOrder',tt.max_per_order,'peoplePerUnit',tt.people_per_unit,'seatRows',tt.seat_rows,'salesStartAt',tt.sales_start_at,'salesEndAt',tt.sales_end_at,'sessionDates',coalesce((select jsonb_agg(s.starts_at order by s.starts_at) from ticket_type_session ts join event_session s on s.id=ts.event_session_id where ts.ticket_type_id=tt.id),'[]'::jsonb)) order by tt.name,tt.id) from ticket_type tt where tt.event_id=${events.id}),'[]'::jsonb)`,
+    ticketOptions:sql<PublicTicketOption[]>`coalesce((select jsonb_agg(jsonb_build_object('id',tt.id,'name',tt.name,'zone',tt.zone,'seatingType',tt.seating_type,'description',tt.description,'priceCents',tt.price_cents,'capacity',tt.capacity,'maxPerOrder',tt.max_per_order,'peoplePerUnit',tt.people_per_unit,'seatRows',tt.seat_rows,'salesStartAt',tt.sales_start_at,'salesEndAt',tt.sales_end_at,'available',${availableUnitsSql(sql`tt.id`, sql`tt.capacity`)},'sessionDates',coalesce((select jsonb_agg(s.starts_at order by s.starts_at) from ticket_type_session ts join event_session s on s.id=ts.event_session_id where ts.ticket_type_id=tt.id),'[]'::jsonb)) order by tt.name,tt.id) from ticket_type tt where tt.event_id=${events.id}),'[]'::jsonb)`,
     date: sql<string | null>`(select to_char(min(starts_at) at time zone 'America/Lima', 'YYYY-MM-DD') from event_session where event_id=${events.id})`,
     endDate: sql<string | null>`(select to_char(max(starts_at) at time zone 'America/Lima', 'YYYY-MM-DD') from event_session where event_id=${events.id})`,
     price: sql<number | null>`(select min(price_cents)::float / 100 from ticket_type where event_id=${events.id})`,

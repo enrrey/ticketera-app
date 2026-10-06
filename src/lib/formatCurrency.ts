@@ -5,12 +5,12 @@ const DEFAULT_LOCALE = "es-ES";
  * plain message for non-finite input instead of throwing or rendering
  * "NaN"/"Infinity".
  */
-export function formatCurrency(amount: number, currency = "USD"): string {
+export function formatCurrency(amount: number, currency = "USD", locale = DEFAULT_LOCALE): string {
   if (!Number.isFinite(amount)) {
     return "Precio no disponible";
   }
 
-  return new Intl.NumberFormat(DEFAULT_LOCALE, {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     minimumFractionDigits: 2,

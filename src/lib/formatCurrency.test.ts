@@ -14,6 +14,10 @@ describe("formatCurrency", () => {
     expect(result).toContain("99,90");
   });
 
+  it("accepts an explicit locale", () => {
+    expect(formatCurrency(45, "PEN", "es-PE")).toMatch(/S\/\s?45\.00/);
+  });
+
   it("returns a fallback message for a non-finite amount", () => {
     expect(formatCurrency(NaN)).toBe("Precio no disponible");
     expect(formatCurrency(Infinity)).toBe("Precio no disponible");

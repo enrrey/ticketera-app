@@ -14,7 +14,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:inspect": "node scripts/inspect-database.mjs",
     "db:bootstrap:super-admin": "tsx scripts/bootstrap-super-admin.ts",
-    "db:seed:events": "tsx scripts/seed-events.ts"
+    "db:seed:events": "tsx scripts/seed-events.ts",
+    "verify:checkout": "tsx scripts/verify-checkout-concurrency.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
