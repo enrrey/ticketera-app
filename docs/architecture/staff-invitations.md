@@ -1,0 +1,15 @@
+# Email invitations
+
+In user management choose **Invitar usuario**, enter email/name and select admin/organizer roles and optional permission overrides. The backend persists a `staff_invitation` intent, then calls Clerk `invitations.createInvitation` with `notify: true`, `expiresInDays: 7` and `redirectUrl: APP_URL.origin`. `APP_URL` is server configuration, defaulting to `http://localhost:3000`; request bodies cannot supply a callback or password.
+
+After the invitee follows the email link, Clerk redirects to the app root with `__clerk_ticket`. That route embeds the existing Clerk SignIn/sign-up UI. Clerk handles the ticket, email ownership, any required registration fields, passwords and session creation. Authentication and registration force a final return to `/`, clearing the invitation callback from the destination. A new staff profile enters the paginated users list after registration, not immediately upon sending email.
+
+The invitation stores desired roles/overrides separately from users. Only its local UUID is placed in backend-controlled Clerk public metadata (`ticketeraInvitationId`); no roles supplied from client or unsafe metadata are trusted. Canonical Clerk reads from authenticated requests and signed user lifecycle webhooks provide that ID and verified email. The transaction locks the intent, checks recipient, expiry, target active/non-archived state and inviter's primary super-admin authorization, applies access once and records `staff.invitation_accepted`. Accepted IDs cannot restore roles revoked later.
+
+Pending and currently sending intents prevent duplicate sends. A failed or stale interrupted delivery can be retried with the same email: the service searches Clerk's pending invitations for the exact recipient and local metadata ID before sending. A delivered invitation whose acknowledgement failed retains its stored intent and does not require a second account. Existing Clerk users should be edited in the CRUD; inviting them returns 409. No acceptance URL/token is returned by the management API or stored in the audit log.
+
+The verification suite uses simulated Clerk email delivery and real isolated SQL migrations. No email is sent to a live recipient as a test. To exercise actual delivery, the super admin must submit a real recipient from the invitation form; check Clerk Dashboard delivery status if the message does not arrive.
+
+Expired invitations are retained as history. Sending again creates a fresh UUID and seven-day expiry, revokes the previous pending Clerk invitation, and prevents the old link from claiming the renewed roles. A partial unique email index permits only one open intent. Ambiguous delivery failures remain claimable until expiration; only definitive provider rejection marks an intent failed.
+
+References: [Create an invitation](https://clerk.com/docs/reference/backend/invitations/create-invitation), [Accept application invitations](https://clerk.com/docs/guides/development/custom-flows/authentication/application-invitations).
