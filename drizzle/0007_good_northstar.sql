@@ -1,0 +1,3 @@
+ALTER TABLE "ticket_type" DROP CONSTRAINT "ticket_type_seating_check";--> statement-breakpoint
+ALTER TABLE "ticket_type" ADD COLUMN "seat_rows" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "ticket_type" ADD CONSTRAINT "ticket_type_seating_check" CHECK ("ticket_type"."seating_type" in ('standing','seated','numbered','box') and "ticket_type"."max_per_order" between 1 and 1000 and "ticket_type"."people_per_unit" between 1 and 50 and ("ticket_type"."seating_type"='box' or "ticket_type"."people_per_unit"=1) and jsonb_typeof("ticket_type"."seat_rows")='array');
