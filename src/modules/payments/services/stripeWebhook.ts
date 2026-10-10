@@ -1,4 +1,5 @@
-import Stripe from "stripe";
+import type Stripe from "stripe";
+import { getStripeClient } from "./stripeClient";
 import { persistStripeEvent, type StripeInboxEvent } from "./webhookInbox";
 
 export async function handleStripeWebhook(
@@ -14,7 +15,7 @@ export async function handleStripeWebhook(
   let event: Stripe.Event;
   try {
     // Do not parse JSON before verification: Stripe signs the exact raw body.
-    event = new Stripe(key).webhooks.constructEvent(await request.text(), signature, secret);
+    event = getStripeClient().webhooks.constructEvent(await request.text(), signature, secret);
   } catch {
     return Response.json({ error: "Invalid webhook signature or payload" }, { status: 400 });
   }

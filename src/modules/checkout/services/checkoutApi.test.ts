@@ -3,13 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { handleCreateCheckout, handleGetCheckout } from "./checkoutApi";
 import { CheckoutError } from "./createCheckout";
 
-const body = { eventId: "main-event", items: [{ ticketTypeId: "00000000-0000-4000-8000-0000000000e1", quantity: 1 }], buyer: { email: "ana@example.com", name: "Ana" } };
+const body = { eventId: "main-event", items: [{ ticketTypeId: "00000000-0000-4000-8000-0000000000e1", quantity: 1 }], buyer: { email: "ana@example.com", name: "Ana",documentType:'dni',documentNumber:'12345678',phone:'999999999' },acceptedTerms:true,termsVersion:'2026-10-09' };
 const post = (payload: unknown, origin: string | null = "http://localhost:3000") => new Request("http://localhost:3000/api/checkout", {
   method: "POST", body: typeof payload === "string" ? payload : JSON.stringify(payload), headers: origin ? { origin, "content-type": "application/json" } : {},
 });
 const created = { orderId: "o1", status: "pending", totalCents: 10000, currency: "pen", expiresAt: "2026-10-05T00:15:00.000Z", serverTime: "2026-10-05T00:00:00.000Z", expired: false, items: [] };
 
 describe("POST /api/checkout", () => {
+  it('requires identity details and explicit current-version consent for new public orders',async()=>{
+    const create=vi.fn();const getMember=async()=>null;
+    expect((await handleCreateCheckout(post({...body,acceptedTerms:false}),{create,getMember})).status).toBe(400);
+    expect((await handleCreateCheckout(post({...body,buyer:{email:'a@example.com',name:'A'}}),{create,getMember})).status).toBe(400);
+    expect((await handleCreateCheckout(post({...body,buyer:{...body.buyer,documentNumber:'123'}}),{create,getMember})).status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
   it("rejects missing or foreign origins before reading anything (CA-08)", async () => {
     const create = vi.fn(); const getMember = vi.fn();
     expect((await handleCreateCheckout(post(body, null), { create, getMember })).status).toBe(403);

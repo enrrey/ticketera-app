@@ -32,7 +32,7 @@ describe("createCheckout", () => {
     expect(reservations).toHaveLength(2);
     for (const reservation of reservations) {
       expect(reservation.status).toBe("active");
-      expect(reservation.expiresAt.getTime() - reservation.createdAt.getTime()).toBe(15 * 60 * 1000);
+      expect(reservation.expiresAt.getTime() - reservation.createdAt.getTime()).toBe(10 * 60 * 1000);
     }
     expect((await ctx.db.select().from(orderItems)).map((item) => item.unitPriceCents).sort()).toEqual([10000, 25050]);
   });

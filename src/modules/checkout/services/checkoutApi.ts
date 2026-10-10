@@ -2,7 +2,7 @@ import { z } from "zod";
 import { isSameOrigin } from "@/lib/sameOrigin";
 import { getCurrentAccessUser } from "@/modules/identity-access";
 import type { CheckoutErrorBody, CheckoutSummary, CreatedCheckout } from "../types";
-import { checkoutSchema, type CheckoutInput } from "./checkoutSchema";
+import { publicCheckoutSchema, type CheckoutInput } from "./checkoutSchema";
 import { CheckoutError, createCheckout } from "./createCheckout";
 import { getCheckout } from "./getCheckout";
 
@@ -20,7 +20,7 @@ export async function handleCreateCheckout(
 ) {
   if (!isSameOrigin(request)) return json({ error: "Origen no permitido" }, 403);
   try {
-    const input = checkoutSchema.parse(await request.json());
+    const input = publicCheckoutSchema.parse(await request.json());
     const created = await create(input, await getMember());
     return json(created, 201);
   } catch (error) {

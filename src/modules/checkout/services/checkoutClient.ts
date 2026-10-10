@@ -2,8 +2,11 @@ import type { CheckoutErrorBody, CheckoutSummary, CreatedCheckout } from "../typ
 
 export type CheckoutRequest = {
   eventId: string;
-  items: { ticketTypeId: string; quantity: number }[];
+  seatHoldToken?: string;
+  items: { ticketTypeId: string; quantity: number; seats?: { rowLabel: string; seatNumber: number }[] }[];
   buyer: { email: string; name: string };
+  acceptedTerms?:true;
+  termsVersion?:'2026-10-09';
 };
 
 export type CheckoutResult<T> = { ok: true; data: T } | { ok: false; status: number; error: CheckoutErrorBody };

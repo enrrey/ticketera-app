@@ -38,11 +38,17 @@ describe("OrderSummary", () => {
     expect(screen.getByText(/Tu reserva venció/)).toBeInTheDocument();
   });
 
-  it("shows line items, the PEN total and the missing-payment notice without any pay action (CA-17)", () => {
+  it("shows line items, the PEN total and the secure pay action", () => {
     render(<OrderSummary summary={summary()} />);
     expect(screen.getByText("2 × General")).toBeInTheDocument();
     expect(screen.getAllByText(/S\/\s?200\.00/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/no se ha cobrado nada/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pagar con Stripe" })).toBeEnabled();
+  });
+  it("never labels a paid order as expired and does not offer a second payment", () => {
+    render(<OrderSummary summary={summary({ status: "paid", expiresAt: start.toISOString() })} />);
+    expect(screen.getByText("Pago confirmado. Tu pedido está pagado.")).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
+vi.mock('@/modules/tickets',()=>({OrderTickets:()=>null}));

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OrderPage } from "./OrderPage";
 
@@ -7,7 +7,7 @@ const summary = {
   serverTime: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString(),
   items: [{ ticketTypeId: "t1", name: "General", quantity: 1, unitPriceCents: 10000, totalCents: 10000 }],
 };
-afterEach(() => { vi.unstubAllGlobals(); window.location.hash = ""; });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); window.location.hash = ""; window.sessionStorage.clear(); });
 
 describe("OrderPage", () => {
   it("sends the fragment token as a header, never in the request URL (CA-18, CA-22)", async () => {
@@ -33,4 +33,18 @@ describe("OrderPage", () => {
     render(<OrderPage orderId="o1" />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/No pudimos cargar tu pedido/);
   });
+  it("uses the return token from sessionStorage and waits for server confirmation instead of trusting the success URL", async () => {
+    vi.useFakeTimers();
+    window.sessionStorage.setItem("ticketera:order:o1", "return-token");
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(summary)).mockResolvedValueOnce(Response.json({ ...summary, status: "paid", expired: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    await act(async () => { render(<OrderPage orderId="o1" outcome="exito" />); });
+    expect(screen.getByText(/Estamos verificando el pago/)).toBeInTheDocument();
+    expect(screen.queryByText("Pago confirmado. Tu pedido está pagado.")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ "x-order-token": "return-token" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText("Pago confirmado. Tu pedido está pagado.")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
 });
+vi.mock('@/modules/tickets',()=>({OrderTickets:()=>null}));

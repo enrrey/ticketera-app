@@ -1,0 +1,71 @@
+// @vitest-environment node
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { createTestDatabase, ids } from '@/modules/checkout/testing';
+import { listOwnTickets } from './listOwnTickets';
+import { readTickets } from './readTickets';
+import { hashTicketCredential, ticketCredential } from './qrToken';
+import { randomUUID } from 'node:crypto';
+import { synchronizeIdentity } from '@/modules/identity-access';
+let ctx: Awaited<ReturnType<typeof createTestDatabase>>;
+let orderId: string;
+let ticketIds: string[];
+beforeAll(async () => {
+  vi.stubEnv('QR_SIGNING_SECRET', 'b'.repeat(64));
+  ctx = await createTestDatabase();
+  orderId = randomUUID();
+  const itemId = randomUUID();
+  ticketIds = Array.from({length: 27}, () => randomUUID());
+  await ctx.pg.exec(`insert into user_role(user_id,role_id) select '${ids.user}', id from role where name='customer';
+    insert into "order" (id,user_id,buyer_email,buyer_name,subtotal_cents,total_cents,status,access_token_hash) values ('${orderId}','${ids.user}','u1@example.com','U1',270000,270000,'paid','hash');
+    insert into order_item(id,order_id,ticket_type_id,quantity,unit_price_cents,total_cents) values ('${itemId}','${orderId}','${ids.general}',27,10000,270000);
+    insert into inventory_reservation(order_item_id,quantity,status) values ('${itemId}',27,'converted');
+    insert into payment(order_id,idempotency_key,amount_cents,status) values ('${orderId}','own-list',270000,'succeeded');`);
+  for (const [index,id] of ticketIds.entries()) await ctx.pg.query('insert into ticket(id,order_item_id,unit_number,qr_token_hash,status) values ($1,$2,$3,$4,$5)', [id,itemId,index+1,hashTicketCredential(ticketCredential(id)),['used','refund_pending','refunded','cancelled'][index] ?? 'valid']);
+},60000);
+afterAll(async () => { await ctx?.pg.close(); vi.unstubAllEnvs(); });
+it('lists actual tickets, paginated by units with event/session and private QR only for valid units', async () => {
+  const first = await listOwnTickets(ids.user,1,ctx.db);
+  const second = await listOwnTickets(ids.user,2,ctx.db);
+  expect(first).toMatchObject({total:27,pageSize:24,page:1});
+  expect(first.tickets).toHaveLength(24);
+  expect(second.tickets).toHaveLength(3);
+  expect(new Set([...first.tickets,...second.tickets].map(t=>t.id)).size).toBe(27);
+  expect(first.tickets[0]).toMatchObject({eventName:'Main',venue:'Venue',orderId});
+  expect(first.tickets[0].sessions[0].id).toBe(ids.session);
+  expect(first.tickets.filter(t=>t.status!=='valid').every(t=>t.qrImage===null)).toBe(true);
+  expect(first.tickets.find(t=>t.status==='valid')?.qrImage).toMatch(/^data:image\/png;base64,/);
+  expect(JSON.stringify(first)).not.toContain('qrTokenHash');
+},15000);
+it('never exposes another buyer tickets; requires active user and effective permission in DB',async()=>{
+  await expect(listOwnTickets(ids.inactiveUser,1,ctx.db)).rejects.toThrow();
+  await ctx.pg.exec(`update "user" set status='active' where id='${ids.inactiveUser}'; insert into user_role(user_id,role_id) select '${ids.inactiveUser}',id from role where name='customer'`);
+  expect((await listOwnTickets(ids.inactiveUser,1,ctx.db)).tickets).toHaveLength(0);
+  await ctx.pg.exec(`insert into user_permission(user_id,permission_id,allowed) select '${ids.user}',id,false from permission where name='tickets.read_own'`);
+  await expect(listOwnTickets(ids.user,1,ctx.db)).rejects.toThrow();
+  await ctx.pg.exec(`delete from user_permission where user_id='${ids.user}'`);
+  expect((await listOwnTickets(ids.user,0,ctx.db)).page).toBe(1);
+},15000);
+it('claims guest tickets only with verified matching email, keeps ownership and retries idempotently',async()=>{
+  const guestOrder=randomUUID(), item=randomUUID(), ticket=randomUUID();
+  await ctx.pg.query('insert into "order"(id,buyer_email,buyer_name,subtotal_cents,total_cents,status) values ($1,$2,$3,10000,10000,$4)',[guestOrder,'  CLAIM@Example.com ','Guest','paid']);
+  await ctx.pg.query('insert into order_item(id,order_id,ticket_type_id,quantity,unit_price_cents,total_cents) values ($1,$2,$3,1,10000,10000)',[item,guestOrder,ids.general]);
+  await ctx.pg.query('insert into ticket(id,order_item_id,unit_number,qr_token_hash) values ($1,$2,1,$3)',[ticket,item,hashTicketCredential(ticketCredential(ticket))]);
+  const profile={clerkUserId:'guest-claim',email:'claim@example.com',name:'Guest',verifiedEmails:[] as string[],disabled:false,updatedAt:new Date()};
+  const unverified=await synchronizeIdentity(profile,ctx.db);
+  expect((await listOwnTickets(unverified.id,1,ctx.db)).total).toBe(0);
+  const verified={...profile,verifiedEmails:['claim@example.com'],updatedAt:new Date(Date.now()+1000)};
+  const owner=await synchronizeIdentity(verified,ctx.db);
+  await synchronizeIdentity(verified,ctx.db);
+  expect((await listOwnTickets(owner.id,1,ctx.db)).tickets.map(t=>t.id)).toEqual([ticket]);
+  const rival=await synchronizeIdentity({...verified,clerkUserId:'other-claim'},ctx.db);
+  expect((await listOwnTickets(rival.id,1,ctx.db)).total).toBe(0);
+},15000);
+it('keeps valid QR after partial refund and suppresses QR with mismatched captured payment',async()=>{
+  await ctx.pg.query('update "order" set status=$1 where id=$2',['partially_refunded',orderId]);
+  await ctx.pg.query('update payment set status=$1 where order_id=$2',['partially_refunded',orderId]);
+  expect((await listOwnTickets(ids.user,2,ctx.db)).tickets.every(t=>t.qrImage)).toBe(true);
+  expect((await readTickets(orderId,{userId:ids.user,token:null},2,ctx.db))?.tickets.every(t=>t.qrImage)).toBe(true);
+  await ctx.pg.query('update payment set amount_cents=1 where order_id=$1',[orderId]);
+  expect((await listOwnTickets(ids.user,2,ctx.db)).tickets.every(t=>t.qrImage===null)).toBe(true);
+  expect((await readTickets(orderId,{userId:ids.user,token:null},2,ctx.db))?.tickets.every(t=>t.qrImage===null)).toBe(true);
+},15000);

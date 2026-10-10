@@ -1,4 +1,7 @@
+export type SelectedSeat = { rowLabel: string; seatNumber: number };
+
 export type CheckoutSummaryItem = {
+  seats?: SelectedSeat[];
   ticketTypeId: string;
   name: string;
   quantity: number;
@@ -11,18 +14,26 @@ export type CheckoutSummary = {
   status: string;
   totalCents: number;
   currency: string;
-  /** ISO timestamp when the 15-minute reservation ends. */
+  /** New reservations last ten minutes; legacy expiry timestamps are preserved. */
   expiresAt: string;
   /** Server clock at read time, so the countdown does not depend on the browser clock. */
   serverTime: string;
   expired: boolean;
   items: CheckoutSummaryItem[];
+  latePayment?: boolean;
+  refundStatus?: string;
+  refundReason?: string;
+  invoice?: { hostedUrl: string | null; pdfUrl: string | null };
 };
 
 /** Returned once, only for guest orders. */
 export type CreatedCheckout = CheckoutSummary & { accessToken?: string };
 
 export type CheckoutTicketOption = {
+  mapPosition?: 'north'|'south'|'east'|'west'|'center';
+  capacity?: number;
+  seatingType?: string;
+  seatRows?: { label: string; seats: number }[];
   id: string;
   name: string;
   zone: string;
