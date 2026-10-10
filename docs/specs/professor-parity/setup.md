@@ -24,7 +24,7 @@ El proceso `npm run payments:work` invoca el endpoint interno cada minuto con `P
 
 ## Pendientes externos
 
-1. País legal de la plataforma/organizadores y configuración de responsabilidades/comisiones para Stripe Connect; no crear cuentas declarando otro país.
+1. País legal de la plataforma/organizadores y responsabilidades Stripe Connect; no crear cuentas declarando otro país. Se conserva la decisión aprobada de liquidación manual por evento y sin comisión de plataforma para el MVP.
 2. `RESEND_API_KEY` y `RESEND_FROM_EMAIL` de remitente verificado; validar entrega antes de cerrar la tarea de correo.
 3. Revisión visual responsive, cámara física y compra Elements de extremo a extremo en sandbox. La herramienta de navegador falló al iniciar; no se registró esa validación como aprobada.
 4. Auditoría de dependencias y despliegue son tareas distintas del tablero; no se realizó deploy, pago comercial ni envío masivo de correos.
