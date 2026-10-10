@@ -15,4 +15,3 @@ it("renders bounded rows and seats, blocks occupied coordinates and returns the 
   fireEvent.click(screen.getByText("Filas siguientes"));
   expect(screen.getByLabelText("Fila F9, asiento 1")).toBeEnabled();
 });
-

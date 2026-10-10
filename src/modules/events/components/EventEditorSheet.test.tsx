@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EventEditorSheet } from "./EventEditorSheet";
 const fetchMock=vi.fn();
 const detail={ id:"id",slug:"event",organizerId:"owner",name:"Evento real",category:"concert",description:"Descripción",imageUrl:"",venueName:"Local",address:"Av. Real 123",city:"Lima",status:"draft",hasOrders:false,sessions:[{startsAt:"2030-01-01T20:00:00Z",endsAt:"2030-01-01T23:00:00Z"}] };
-beforeEach(()=>{ fetchMock.mockReset(); vi.stubGlobal("fetch",fetchMock); });
+beforeEach(()=>{ fetchMock.mockReset(); vi.stubGlobal("fetch",(url:string,options?:RequestInit)=>url==="/api/venues"?Promise.resolve(Response.json([{id:"venue",name:"Estadio del catálogo",address:"Av. Estadio 555",city:"Cusco"}])):fetchMock(url,options)); });
 afterEach(()=>vi.unstubAllGlobals());
 it("creates a real draft with Peru session times and refreshes on success",async()=>{
   const saved=vi.fn(); fetchMock.mockResolvedValue(Response.json({ slug:"new-event" },{status:201}));
@@ -67,4 +67,31 @@ it("updates only the cover when purchases freeze the other event data",async()=>
   await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
   await waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
   expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({imageUrl:"https://cdn.example.com/new-cover.jpg"});
+});
+it("keeps required sections visible and rejects reversed session dates before submitting",async()=>{
+  fetchMock.mockResolvedValueOnce(Response.json(detail));
+  render(<EventEditorSheet mode="edit" slug="event" canPublish={true} onClose={vi.fn()} onSaved={vi.fn()}/>);
+  await screen.findByDisplayValue("Evento real");
+  expect(screen.getByRole("navigation",{name:"Pasos para configurar el evento"})).toBeInTheDocument();
+  expect(screen.getByLabelText("Nombre")).toBeVisible();
+  expect(screen.getByLabelText("Dirección")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Fin"),{target:{value:"2029-01-01T15:00"}});
+  await userEvent.click(screen.getByRole("button",{name:"Guardar evento"}));
+  expect(screen.getByRole("alert")).toHaveTextContent("fin posterior al inicio");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("selects a catalog venue and draws configured tribunes only when the map is enabled",async()=>{
+  render(<EventEditorSheet mode="create" canPublish={false} onClose={vi.fn()} onSaved={vi.fn()}/>);
+  await screen.findByRole("option",{name:"Estadio del catálogo · Cusco"});
+  fireEvent.change(screen.getByLabelText("Elegir recinto"),{target:{value:"venue"}});
+  expect(screen.getByLabelText("Recinto")).toHaveValue("Estadio del catálogo");
+  expect(screen.getByLabelText("Dirección")).toHaveValue("Av. Estadio 555");
+  expect(screen.queryByLabelText("Plano de Estadio del catálogo")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByLabelText("Habilitar plano y selección de asientos"));
+  await userEvent.click(screen.getByRole("button",{name:"Añadir tipo de entrada"}));
+  fireEvent.change(screen.getByLabelText("Ubicación en el plano de entrada 1"),{target:{value:"east"}});
+  fireEvent.change(screen.getByLabelText("Nombre de entrada 1"),{target:{value:"Oriente"}});
+  expect(screen.getByLabelText("Plano de Estadio del catálogo")).toBeInTheDocument();
+  expect(screen.getByRole("button",{name:/Oriente, 100 lugares/})).toBeInTheDocument();
 });

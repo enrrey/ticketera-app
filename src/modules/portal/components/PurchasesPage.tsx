@@ -1,0 +1,13 @@
+import Link from 'next/link';
+import { listPurchases } from '@/modules/checkout/server';
+import { formatCurrency } from '@/lib/formatCurrency';
+const labels:Record<string,string>={pending:'Pago pendiente',paid:'Pagado',expired:'Reserva vencida',cancelled:'Cancelado',partially_refunded:'Reembolso parcial',refunded:'Reembolsado'};
+export async function PurchasesPage({userId,page=1}:{userId:string;page?:number}) {
+  const data=await listPurchases(userId,page);
+  const path='/mis-compras';
+  return <main className="page-shell grid gap-6 py-10"><nav className="flex flex-wrap gap-4 text-sm" aria-label="Mi cuenta"><Link href="/">Volver a eventos</Link><Link href="/mis-compras" aria-current="page" className="underline">Mis compras</Link><Link href="/mis-entradas" className="underline">Mis entradas</Link></nav>
+    <header><h1 className="text-3xl font-semibold">Mis compras</h1><p className="mt-2 text-muted-foreground">Consulta tus pedidos y abre una compra pagada para ver o descargar cada entrada con su QR.</p></header>
+    {!data.total?<section className="rounded-xl border p-8"><h2 className="font-semibold">Todavía no tienes compras</h2><p className="mt-2">Las compras como invitado se vinculan al iniciar sesión con el mismo correo verificado. También puedes abrir el enlace privado de tu pedido.</p><Link href="/" className="mt-4 inline-block underline">Explorar eventos</Link></section>:<div className="grid gap-4 md:grid-cols-2">{data.orders.map(order=><article className="grid gap-3 rounded-xl border p-5" key={order.id}><div className="flex items-start justify-between gap-3"><h2 className="font-semibold">{order.eventNames}</h2><span className="rounded bg-muted px-2 py-1 text-sm">{labels[order.status]??order.status}</span></div><p>{order.units} {order.units===1?'entrada':'entradas'} · {new Intl.DateTimeFormat('es-PE',{timeZone:'America/Lima',dateStyle:'medium'}).format(order.createdAt)}</p><strong>{formatCurrency(order.totalCents/100,order.currency.toUpperCase(),'es-PE')}</strong><Link href={`/pedidos/${order.id}`} className="inline-flex w-fit rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">{['paid','partially_refunded'].includes(order.status)?'Ver entradas y QR':'Ver pedido'}</Link><small className="break-all text-muted-foreground">Pedido {order.id}</small></article>)}</div>}
+    {data.total>data.pageSize&&<nav className="flex gap-4" aria-label="Páginas de compras">{page>1&&<Link href={`${path}?page=${page-1}`} className="underline">Anterior</Link>}<span>Página {page} de {Math.ceil(data.total/data.pageSize)}</span>{page*data.pageSize<data.total&&<Link href={`${path}?page=${page+1}`} className="underline">Siguiente</Link>}</nav>}
+  </main>;
+}

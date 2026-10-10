@@ -1,4 +1,5 @@
 import type { TicketTypeInput } from "./eventManagement.types";
+import type { SeatingLayout } from "@/modules/seating";
 export type PublicTicketOption=Omit<TicketTypeInput,"sessionIndexes">&{id:string;sessionDates:string[];/** Units still sellable (capacity minus sold and unexpired reservations). */available:number};
 export type EventCategory =
   | "concert"
@@ -18,6 +19,7 @@ export interface Event {
   /** ISO 8601 date-time string. */
   date: string;
   venue: string;
+  address?: string;
   city: string;
   price: number | null;
   /** ISO 4217 currency code, e.g. "USD". */
@@ -37,4 +39,5 @@ export interface Event {
   minimumAge?:number;
   entryInstructions?:string;
   description?:string;
+  seatingLayout?: SeatingLayout;
 }

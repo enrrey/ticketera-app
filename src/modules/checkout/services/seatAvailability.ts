@@ -53,4 +53,3 @@ export async function handleGetSeatAvailability(slug: string,request?:Request) {
     return Response.json({ error: "No pudimos cargar los asientos" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }
-

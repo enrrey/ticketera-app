@@ -30,10 +30,12 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => pg.close());
 it("lists only published events publicly without sales data", async () => {
+  await pg.exec(`update event set seating_layout='{"enabled":true,"template":"stadium","stagePosition":"south"}'::jsonb where slug='zayn'; update ticket_type set map_position='east' where event_id=(select id from event where slug='zayn')`);
   const rows = await listDatabaseEvents("public", null, database);
   expect(rows).toHaveLength(1); expect(rows[0].id).toBe("zayn");
   expect(rows[0]).not.toHaveProperty("netRevenueCents"); expect(rows[0]).not.toHaveProperty("ticketsIssued");
   expect(rows[0].featured).toBe(false);
+  expect(rows[0]).toMatchObject({seatingLayout:{enabled:true,template:"stadium",stagePosition:"south"},ticketOptions:[{mapPosition:"east"}]});
 });
 it("reads persisted highlights and never exposes highlighted drafts",async()=>{
   await pg.exec("update event set featured=true where slug in ('zayn','mana')");

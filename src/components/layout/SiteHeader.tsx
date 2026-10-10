@@ -32,12 +32,12 @@ export function SiteHeader({ searchValue, onSearchChange, savedCount = 0, onSave
         </form>
         <button className="saved-button" onClick={onSavedClick} aria-label={`Mi selección, ${savedCount} eventos`}><Heart size={17} /><span>Mi selección</span>{savedCount > 0 && <b>{savedCount}</b>}</button>
         <Show when="signed-out"><Link className="account-link" href="/ingresar"><UserRound size={16} /><span>Ingresar</span></Link></Show>
-        <Show when="signed-in"><UserButton /></Show>
+        <Show when="signed-in"><Link className="account-link" href="/mis-compras">Mis compras</Link><UserButton /></Show>
         {access?.permissions.includes("staff.manage") && <Link className="account-link" href="/administracion/usuarios">Administración</Link>}
         {access?.permissions.includes("events.manage") && <Link className="account-link" href="/organizador">Organizador</Link>}
         <Sheet>
           <SheetTrigger render={<Button variant="ghost" size="icon" className="mobile-menu" />}><Menu /><span className="sr-only">Abrir menú</span></SheetTrigger>
-          <SheetContent side="right"><SheetHeader><SheetTitle>Explora Ticketera</SheetTitle></SheetHeader><nav className="mobile-links" aria-label="Navegación móvil">{[["Descubrir conciertos", "#explorar"], ["Selección destacada", "#destacados"], ["Cómo funciona", "#ayuda"], ["Mis entradas", "/mis-entradas"], ["Ingresar", "/ingresar"], ["Portal organizador · demo", "/organizador"]].map(([label, href]) => <SheetClose nativeButton={false} key={href} render={<Link href={href} />}>{label}<ArrowUpRight size={16} /></SheetClose>)}</nav></SheetContent>
+          <SheetContent side="right"><SheetHeader><SheetTitle>Explora Ticketera</SheetTitle></SheetHeader><nav className="mobile-links" aria-label="Navegación móvil">{[["Descubrir conciertos", "#explorar"], ["Selección destacada", "#destacados"], ["Cómo funciona", "#ayuda"], ["Mis compras", "/mis-compras"], ["Mis entradas", "/mis-entradas"], ["Ingresar", "/ingresar"], ["Portal organizador", "/organizador"]].map(([label, href]) => <SheetClose nativeButton={false} key={href} render={<Link href={href} />}>{label}<ArrowUpRight size={16} /></SheetClose>)}</nav></SheetContent>
         </Sheet>
       </div>
     </header>

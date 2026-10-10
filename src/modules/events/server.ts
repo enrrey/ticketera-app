@@ -1,2 +1,2 @@
 export { listDatabaseEvents, handleEventListing, getPublishedEvent } from "./services/eventListing";
-export { handleEventManagement } from "./services/eventManagement";
+export { handleEventManagement, handleVenueListing } from "./services/eventManagement";

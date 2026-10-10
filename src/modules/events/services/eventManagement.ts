@@ -3,17 +3,19 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { getDatabase } from "@/lib/db";
-import { auditLogs, events, eventSessions, ticketTypes, ticketTypeSessions, venues, promotionTicketTypes } from "@/lib/db/schema";
+import { auditLogs, events, eventSessions, ticketTypes, ticketTypeSessions, venues, promotionTicketTypes, seatHolds } from "@/lib/db/schema";
 import { AccessError, getAccessUser, getCurrentAccessUser } from "@/modules/identity-access";
 import type { AccessUser } from "@/modules/identity-access";
+import { requestCancelEvent } from "@/modules/refunds/server";
 import type { EventInput, TicketTypeInput } from "../eventManagement.types";
 import { isEventImageUrl } from "./eventImageUrl";
 
+const layoutSchema=z.object({enabled:z.boolean(),template:z.enum(["stadium","theater","custom"]),stagePosition:z.enum(["north","south"])}).strict();
 const imageSchema=z.string().trim().max(1000).refine(isEventImageUrl,"Usa una imagen local o una URL HTTPS pública");
-const ticketSchema=z.object({ id:z.uuid().optional(),name:z.string().trim().min(1).max(100),zone:z.string().trim().min(1).max(100),seatingType:z.enum(["standing","seated","numbered","box"]),description:z.string().trim().max(1000),priceCents:z.number().int().min(0).max(99_999_999),capacity:z.number().int().min(1).max(100_000),maxPerOrder:z.number().int().min(1).max(1000),peoplePerUnit:z.number().int().min(1).max(50),seatRows:z.array(z.object({label:z.string().trim().min(1).max(20),seats:z.number().int().min(1).max(500)}).strict()).max(100).default([]),salesStartAt:z.iso.datetime({offset:true}),salesEndAt:z.iso.datetime({offset:true}),sessionIndexes:z.array(z.number().int().min(0).max(29)).min(1).max(30) }).strict();
+const ticketSchema=z.object({ id:z.uuid().optional(),name:z.string().trim().min(1).max(100),zone:z.string().trim().min(1).max(100),seatingType:z.enum(["standing","seated","numbered","box"]),mapPosition:z.enum(["north","south","east","west","center"]).optional(),description:z.string().trim().max(1000),priceCents:z.number().int().min(0).max(99_999_999),capacity:z.number().int().min(1).max(100_000),maxPerOrder:z.number().int().min(1).max(1000),peoplePerUnit:z.number().int().min(1).max(50),seatRows:z.array(z.object({label:z.string().trim().min(1).max(20),seats:z.number().int().min(1).max(500)}).strict()).max(100).default([]),salesStartAt:z.iso.datetime({offset:true}),salesEndAt:z.iso.datetime({offset:true}),sessionIndexes:z.array(z.number().int().min(0).max(29)).min(1).max(30) }).strict();
 
 function ticketInputs(records:(typeof ticketTypes.$inferSelect)[],sessions:(typeof eventSessions.$inferSelect)[],links:(typeof ticketTypeSessions.$inferSelect)[]):TicketTypeInput[] {
-  return records.map((record)=>({id:record.id,name:record.name,zone:record.zone,seatingType:record.seatingType as TicketTypeInput["seatingType"],description:record.description,priceCents:record.priceCents,capacity:record.capacity,maxPerOrder:record.maxPerOrder,peoplePerUnit:record.peoplePerUnit,seatRows:record.seatRows,salesStartAt:record.salesStartAt.toISOString(),salesEndAt:record.salesEndAt.toISOString(),sessionIndexes:sessions.map((session,index)=>links.some((link)=>link.ticketTypeId===record.id&&link.eventSessionId===session.id)?index:-1).filter((index)=>index>=0)}));
+  return records.map((record)=>({id:record.id,name:record.name,zone:record.zone,seatingType:record.seatingType as TicketTypeInput["seatingType"],mapPosition:record.mapPosition,description:record.description,priceCents:record.priceCents,capacity:record.capacity,maxPerOrder:record.maxPerOrder,peoplePerUnit:record.peoplePerUnit,seatRows:record.seatRows,salesStartAt:record.salesStartAt.toISOString(),salesEndAt:record.salesEndAt.toISOString(),sessionIndexes:sessions.map((session,index)=>links.some((link)=>link.ticketTypeId===record.id&&link.eventSessionId===session.id)?index:-1).filter((index)=>index>=0)}));
 }
 
 const inputSchema = z.object({
@@ -22,6 +24,7 @@ const inputSchema = z.object({
   imageUrl: imageSchema,
   venueName: z.string().trim().min(2).max(160), address: z.string().trim().min(2).max(300), city: z.string().trim().min(2).max(100),
   sessions: z.array(z.object({ startsAt: z.iso.datetime({ offset: true }), endsAt: z.iso.datetime({ offset: true }) }).strict()).min(1).max(30),
+  seatingLayout:layoutSchema.optional(),
   status: z.enum(["draft","published","cancelled"]).default("draft"),
   minimumAge:z.number().int().min(0).max(99).optional(),entryInstructions:z.string().trim().max(2000).optional(),ticketTypes:z.array(ticketSchema).max(50).optional(),featured:z.boolean().optional(),
 }).strict();
@@ -33,16 +36,40 @@ export function assertEventManager(actor: AccessUser | null) {
 }
 export const managesAllEvents = (actor: AccessUser) => actor.roles.some((role) => role === "admin" || role === "super_admin");
 
+export async function listManagedVenues(actorId:string,database:PgDatabase<PgQueryResultHKT,Record<string,unknown>>=getDatabase()) {
+  const actor=assertEventManager(await getAccessUser(actorId,database));
+  return database.selectDistinct({id:venues.id,name:venues.name,address:venues.address,city:venues.city}).from(venues).innerJoin(events,eq(events.venueId,venues.id)).where(managesAllEvents(actor)?undefined:eq(events.organizerId,actor.id)).orderBy(venues.name,venues.city,venues.id);
+}
+
+export async function handleVenueListing(request:Request) {
+  const headers={"Cache-Control":"private, no-store",Vary:"Cookie"};
+  try {
+    if(request.method!=="GET") throw new AccessError(405,"Método no permitido");
+    if(new URL(request.url).search) throw new AccessError(400,"Consulta inválida");
+    const actor=assertEventManager(await getCurrentAccessUser());
+    return Response.json(await listManagedVenues(actor.id),{headers});
+  } catch(error) {
+    return Response.json({error:error instanceof AccessError?error.message:"No pudimos cargar los recintos"},{status:error instanceof AccessError?error.status:503,headers});
+  }
+}
+
 export async function manageEvent(actorId: string, method: "GET" | "POST" | "PATCH" | "DELETE", slug?: string, rawInput?: unknown, database: PgDatabase<PgQueryResultHKT, Record<string, unknown>> = getDatabase()) {
   const coverOnly=method==="PATCH" && typeof rawInput==="object" && rawInput!==null && Object.keys(rawInput).every((key)=>["imageUrl","featured"].includes(key)) && "imageUrl" in rawInput;
   const featuredOnly=method==="PATCH" && typeof rawInput==="object" && rawInput!==null && Object.keys(rawInput).length===1 && "featured" in rawInput;
-  const input = method === "POST" || method === "PATCH" ? featuredOnly ? z.object({featured:z.boolean()}).strict().parse(rawInput) : coverOnly ? z.object({imageUrl:imageSchema,featured:z.boolean().optional()}).strict().parse(rawInput) : inputSchema.parse(rawInput) : undefined;
+  const cancellationOnly=method==="PATCH" && typeof rawInput==="object" && rawInput!==null && Object.keys(rawInput).length===1 && "status" in rawInput && rawInput.status==="cancelled";
+  const input = method === "POST" || method === "PATCH" ? cancellationOnly ? z.object({status:z.literal("cancelled")}).strict().parse(rawInput) : featuredOnly ? z.object({featured:z.boolean()}).strict().parse(rawInput) : coverOnly ? z.object({imageUrl:imageSchema,featured:z.boolean().optional()}).strict().parse(rawInput) : inputSchema.parse(rawInput) : undefined;
   return database.transaction(async (tx) => {
     // Serialize mutations and re-check current permissions within the transaction.
     await tx.execute(sql`select id from "user" where id=${actorId}::uuid for update`);
     const actor = assertEventManager(await getAccessUser(actorId, tx));
     const [existing] = slug ? await tx.select().from(events).where(managesAllEvents(actor) ? eq(events.slug, slug) : and(eq(events.slug, slug), eq(events.organizerId, actor.id))).for("update") : [];
     if (method !== "POST" && !existing) throw new AccessError(404, "Evento no encontrado");
+    if (method === "PATCH" && input && "status" in input && input.status === "cancelled") {
+      // Cancellation locks orders before inventory, queues durable refunds, and preserves
+      // every other form field even when the legacy editor submits a complete payload.
+      const cancelled = await requestCancelEvent(actor.id, existing!.id, tx);
+      return { id: existing!.id, slug: existing!.slug, status: cancelled.status, queued: cancelled.queued };
+    }
     const featured = (input as EventInput | undefined)?.featured;
     if (featured !== undefined && (featuredOnly || featured !== (existing?.featured ?? false)) && !managesAllEvents(actor)) throw new AccessError(403, "Solo administración puede destacar eventos");
     if (featuredOnly) {
@@ -60,7 +87,13 @@ export async function manageEvent(actorId: string, method: "GET" | "POST" | "PAT
       const sessions = await tx.select().from(eventSessions).where(eq(eventSessions.eventId, existing!.id)).orderBy(eventSessions.startsAt);
       const options=await tx.select().from(ticketTypes).where(eq(ticketTypes.eventId,existing!.id)).orderBy(ticketTypes.id);
       const links=await tx.select().from(ticketTypeSessions).where(eq(ticketTypeSessions.eventId,existing!.id));
-      return { id: existing!.id, slug: existing!.slug, organizerId: existing!.organizerId, name: existing!.name, category: existing!.category, description: existing!.description, imageUrl: existing!.imageUrl ?? "", status: existing!.status, featured:existing!.featured, venueName: venue.name, address: venue.address, city: venue.city,minimumAge:existing!.minimumAge,entryInstructions:existing!.entryInstructions,ticketTypes:ticketInputs(options,sessions,links), sessions: sessions.map((session) => ({ startsAt: session.startsAt.toISOString(), endsAt: session.endsAt.toISOString() })), hasOrders: purchased };
+      return { id: existing!.id, slug: existing!.slug, organizerId: existing!.organizerId, name: existing!.name, category: existing!.category, description: existing!.description, imageUrl: existing!.imageUrl ?? "", status: existing!.status, featured:existing!.featured, venueName: venue.name, address: venue.address, city: venue.city,minimumAge:existing!.minimumAge,entryInstructions:existing!.entryInstructions,ticketTypes:ticketInputs(options,sessions,links), sessions: sessions.map((session) => ({ startsAt: session.startsAt.toISOString(), endsAt: session.endsAt.toISOString() })), hasOrders: purchased,seatingLayout:existing!.seatingLayout };
+    }
+    // Hold creation also locks the event: editing cannot reinterpret a live selection.
+    if(existing && (method === "DELETE" || !coverOnly)){
+      const [activeHold]=await tx.select({id:seatHolds.id}).from(seatHolds).where(and(eq(seatHolds.eventId,existing.id),sql`${seatHolds.expiresAt}>clock_timestamp()`)).limit(1);
+      if(activeHold) throw new AccessError(409,"Hay asientos seleccionados temporalmente. Espera a que se liberen antes de modificar el evento");
+      await tx.delete(seatHolds).where(eq(seatHolds.eventId,existing.id));
     }
     if (method === "DELETE") {
       if (existing!.status !== "draft" || purchased) throw new AccessError(409, "Solo puedes eliminar borradores sin pedidos");
@@ -91,6 +124,8 @@ export async function manageEvent(actorId: string, method: "GET" | "POST" | "PAT
     const oldSessions = existing ? await tx.select().from(eventSessions).where(eq(eventSessions.eventId, existing.id)).orderBy(eventSessions.startsAt) : [];
     const oldLinks=existing?await tx.select().from(ticketTypeSessions).where(eq(ticketTypeSessions.eventId,existing.id)):[];
     const options=values.ticketTypes??ticketInputs(lockedTypes,oldSessions,oldLinks);
+    const seatingLayout=values.seatingLayout??(existing?.seatingLayout.enabled?existing.seatingLayout:{...(existing?.seatingLayout??{template:"stadium" as const,stagePosition:"north" as const}),enabled:options.some((option)=>option.seatingType==="numbered")});
+    if(!seatingLayout.enabled && options.some((option)=>option.seatingType==="numbered")) throw new AccessError(400,"Habilita el plano y la selección de asientos para configurar entradas numeradas");
     const optionIds=options.flatMap((option)=>option.id?[option.id]:[]);
     if(new Set(optionIds).size!==optionIds.length || options.some((option)=>option.id&&!lockedTypes.some((record)=>record.id===option.id))) throw new AccessError(400,"Tipo de entrada inválido para este evento");
     if(new Set(options.map((option)=>`${option.zone.toLowerCase()}:${option.name.toLowerCase()}`)).size!==options.length) throw new AccessError(400,"Evita nombres de entrada duplicados en la misma zona");
@@ -109,8 +144,9 @@ export async function manageEvent(actorId: string, method: "GET" | "POST" | "PAT
     const scheduleChanged = oldSessions.length !== sorted.length || oldSessions.some((session,index) => session.startsAt.getTime() !== sorted[index].startsAt.getTime() || session.endsAt.getTime() !== sorted[index].endsAt.getTime());
     if (scheduleChanged && lockedTypes.length && values.ticketTypes===undefined) throw new AccessError(409, "Actualiza también la validez de las entradas al modificar las sesiones");
     const [oldVenue] = existing ? await tx.select().from(venues).where(eq(venues.id, existing.venueId)) : [];
-    const venue = oldVenue && oldVenue.name === values.venueName && oldVenue.address === values.address && oldVenue.city === values.city ? oldVenue : (await tx.insert(venues).values({ name: values.venueName, address: values.address, city: values.city }).returning())[0];
-    const fields = { featured:values.featured??existing?.featured??false, name: values.name, category: values.category, description: values.description, imageUrl: values.imageUrl || null, venueId: venue.id, status: values.status,minimumAge:values.minimumAge??existing?.minimumAge??0,entryInstructions:values.entryInstructions??existing?.entryInstructions??"" };
+    const matchingVenues=await tx.select({venue:venues}).from(venues).innerJoin(events,eq(events.venueId,venues.id)).where(and(eq(venues.name,values.venueName),eq(venues.address,values.address),eq(venues.city,values.city),managesAllEvents(actor)?undefined:eq(events.organizerId,actor.id))).limit(1);
+    const venue = oldVenue && oldVenue.name === values.venueName && oldVenue.address === values.address && oldVenue.city === values.city ? oldVenue : matchingVenues[0]?.venue??(await tx.insert(venues).values({ name: values.venueName, address: values.address, city: values.city }).returning())[0];
+    const fields = { seatingLayout,featured:values.featured??existing?.featured??false, name: values.name, category: values.category, description: values.description, imageUrl: values.imageUrl || null, venueId: venue.id, status: values.status,minimumAge:values.minimumAge??existing?.minimumAge??0,entryInstructions:values.entryInstructions??existing?.entryInstructions??"" };
     const [saved] = existing ? await tx.update(events).set({ ...fields, updatedAt: new Date() }).where(eq(events.id, existing.id)).returning() : await tx.insert(events).values({ ...fields, slug: `${values.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").slice(0,75)}-${randomUUID().slice(0,8)}`, organizerId: actorId, createdById: actorId }).returning();
     if (scheduleChanged) {
       if(existing) await tx.delete(ticketTypeSessions).where(eq(ticketTypeSessions.eventId,existing.id));
@@ -126,7 +162,7 @@ export async function manageEvent(actorId: string, method: "GET" | "POST" | "PAT
       }
       const savedSessions=await tx.select().from(eventSessions).where(eq(eventSessions.eventId,saved.id)).orderBy(eventSessions.startsAt);
       for(const option of options){
-        const fields={name:option.name,zone:option.zone,seatingType:option.seatingType,description:option.description,priceCents:option.priceCents,capacity:option.capacity,maxPerOrder:option.maxPerOrder,peoplePerUnit:option.peoplePerUnit,seatRows:option.seatRows,salesStartAt:new Date(option.salesStartAt),salesEndAt:new Date(option.salesEndAt)};
+        const fields={mapPosition:option.mapPosition??lockedTypes.find((record)=>record.id===option.id)?.mapPosition??"west",name:option.name,zone:option.zone,seatingType:option.seatingType,description:option.description,priceCents:option.priceCents,capacity:option.capacity,maxPerOrder:option.maxPerOrder,peoplePerUnit:option.peoplePerUnit,seatRows:option.seatRows,salesStartAt:new Date(option.salesStartAt),salesEndAt:new Date(option.salesEndAt)};
         const [type]=option.id?await tx.update(ticketTypes).set(fields).where(and(eq(ticketTypes.id,option.id),eq(ticketTypes.eventId,saved.id))).returning():await tx.insert(ticketTypes).values({...fields,eventId:saved.id}).returning();
         await tx.delete(ticketTypeSessions).where(eq(ticketTypeSessions.ticketTypeId,type.id));
         await tx.insert(ticketTypeSessions).values(option.sessionIndexes.map((index)=>({eventId:saved.id,ticketTypeId:type.id,eventSessionId:savedSessions.find((session)=>session.startsAt.getTime()===sessions[index].startsAt.getTime())!.id})));

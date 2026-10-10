@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import type { AccessUser } from "@/modules/identity-access/types";
 import { getAccessUser } from "@/modules/identity-access";
-import { manageEvent, handleEventManagement } from "./eventManagement";
+import { manageEvent, handleEventManagement, listManagedVenues, handleVenueListing } from "./eventManagement";
 const state = vi.hoisted(() => ({ actor: null as AccessUser | null }));
 vi.mock("@/modules/identity-access", async (original) => ({ ...await original<typeof import("@/modules/identity-access")>(), getCurrentAccessUser: async () => state.actor }));
 vi.mock("@/lib/db", () => ({ getDatabase: () => database }));
@@ -19,6 +19,48 @@ beforeAll(async () => {
   for (const [id,role] of [[owner,"organizer"],[other,"organizer"],[admin,"admin"],[customer,"customer"]]) await pg.exec(`insert into "user" (id,clerk_user_id,email,name,identity_updated_at) values ('${id}','${id}','${id}@example.com','Test',now()); insert into user_role(user_id,role_id) select '${id}',id from role where name='${role}'`);
 },60_000);
 afterAll(async()=>pg.close());
+it("cancels purchased events through status-only PATCH and preserves pending reservations", async()=>{
+  const created=await manageEvent(owner,"POST",undefined,input(),database);
+  const [type]=(await pg.query<{id:string}>("select id from ticket_type where event_id=$1",[created!.id])).rows;
+  const orderId="00000000-0000-4000-8000-000000000091",pendingId="00000000-0000-4000-8000-000000000092",ticketId="00000000-0000-4000-8000-000000000093";
+  await pg.exec(`insert into "order"(id,buyer_email,buyer_name,status,subtotal_cents,total_cents) values('${orderId}','paid@example.test','Paid','paid',12550,12550),('${pendingId}','pending@example.test','Pending','pending',12550,12550);
+    insert into order_item(id,order_id,ticket_type_id,quantity,unit_price_cents,total_cents) values('${orderId}','${orderId}','${type.id}',1,12550,12550),('${pendingId}','${pendingId}','${type.id}',1,12550,12550);
+    insert into inventory_reservation(order_item_id,quantity,status) values('${pendingId}',1,'active');
+    insert into payment(order_id,stripe_payment_intent_id,idempotency_key,status,amount_cents) values('${orderId}','pi_event_cancel_integration','event-cancel-fixture','succeeded',12550);
+    insert into ticket(id,order_item_id,unit_number,qr_token_hash) values('${ticketId}','${orderId}',1,'event-cancel-integration-hash');
+    insert into user_permission(user_id,permission_id,allowed) select '${owner}',id,true from permission where name='refunds.manage' on conflict(user_id,permission_id) do update set allowed=true;`);
+  state.actor=await getAccessUser(owner,database);
+  const response=await handleEventManagement(request("PATCH",{status:"cancelled"}),created!.slug);
+  expect(response.status).toBe(200); expect(await response.json()).toMatchObject({id:created!.id,slug:created!.slug,status:"cancelled",queued:1});
+  expect((await pg.query<{status:string}>("select status from ticket where id=$1",[ticketId])).rows[0].status).toBe("refund_pending");
+  expect((await pg.query<{status:string}>("select status from inventory_reservation where order_item_id=$1",[pendingId])).rows[0].status).toBe("active");
+  expect((await pg.query<{status:string}>('select status from "order" where id=$1',[pendingId])).rows[0].status).toBe("pending");
+  expect(await manageEvent(owner,"PATCH",created!.slug,{status:"cancelled"},database)).toMatchObject({queued:0});
+  expect((await pg.query("select * from refund where reason='event_cancelled'")).rows).toHaveLength(1);
+  await pg.exec(`delete from refund_ticket where ticket_id='${ticketId}';
+    delete from refund where payment_id in(select id from payment where order_id='${orderId}');
+    delete from ticket where id='${ticketId}'; delete from payment where order_id='${orderId}';
+    delete from inventory_reservation where order_item_id='${pendingId}';
+    delete from order_item where order_id in('${orderId}','${pendingId}');
+    delete from "order" where id in('${orderId}','${pendingId}');
+    delete from user_permission where user_id='${owner}'; delete from audit_log;`);
+});
+it("treats a full cancellation payload only as cancellation without changing business fields", async()=>{
+  const data=input(),created=await manageEvent(owner,"POST",undefined,data,database);
+  await pg.exec(`insert into user_permission(user_id,permission_id,allowed) select '${owner}',id,true from permission where name='refunds.manage' on conflict(user_id,permission_id) do update set allowed=true`);
+  await manageEvent(owner,"PATCH",created!.slug,{...data,status:"cancelled",name:"Ignored edit",address:"Ignored address",imageUrl:"https://cdn.example.com/ignored.jpg",featured:true,ticketTypes:[]},database);
+  expect(await manageEvent(owner,"GET",created!.slug,undefined,database)).toMatchObject({status:"cancelled",name:data.name,address:data.address,imageUrl:"",featured:false,ticketTypes:[{name:"General",priceCents:12550}]});
+  await pg.exec(`delete from user_permission where user_id='${owner}'; delete from audit_log;`);
+});
+it("requires persisted refund permission and ownership before PATCH cancellation", async()=>{
+  const created=await manageEvent(owner,"POST",undefined,input(),database);
+  await expect(manageEvent(owner,"PATCH",created!.slug,{status:"cancelled"},database)).rejects.toMatchObject({status:403});
+  await pg.exec(`insert into user_permission(user_id,permission_id,allowed) select '${other}',id,true from permission where name='refunds.manage' on conflict(user_id,permission_id) do update set allowed=true`);
+  await expect(manageEvent(other,"PATCH",created!.slug,{status:"cancelled"},database)).rejects.toMatchObject({status:404});
+  expect(await manageEvent(owner,"GET",created!.slug,undefined,database)).toMatchObject({status:"draft"});
+  await manageEvent(owner,"DELETE",created!.slug,undefined,database);
+  await pg.exec(`delete from user_permission where user_id='${other}'; delete from audit_log;`);
+});
 it("lets super admin create and feature events while rejecting organizer feature changes", async()=>{
   await pg.exec(`insert into user_role(user_id,role_id) select '${admin}',id from role where name='super_admin' on conflict do nothing`);
   const created=await manageEvent(admin,"POST",undefined,{...input(),featured:true},database);
@@ -99,4 +141,51 @@ it("validates numbered capacity, session ownership, sales windows and cross-even
   await expect(manageEvent(owner,"POST",undefined,{...data,ticketTypes:(detail as unknown as {ticketTypes:unknown[]}).ticketTypes},database)).rejects.toMatchObject({status:400});
   const numbered=await manageEvent(owner,"POST",undefined,{...data,ticketTypes:[{...option,seatingType:"numbered",seatRows:[{label:"A",seats:10},{label:"B",seats:10}],capacity:20}]},database);
   expect(await manageEvent(owner,"GET",numbered!.slug,undefined,database)).toMatchObject({ticketTypes:[{capacity:20,seatingType:"numbered",seatRows:[{label:"A",seats:10},{label:"B",seats:10}]}]});
+});
+it("persists stadium layout and tribune positions and rejects disabled numbered selection",async()=>{
+  const data=input(); const option={...data.ticketTypes[0],seatingType:"numbered",capacity:12,seatRows:[{label:"A",seats:12}],mapPosition:"east"};
+  const seatingLayout={enabled:true,template:"stadium",stagePosition:"south"};
+  const created=await manageEvent(owner,"POST",undefined,{...data,seatingLayout,ticketTypes:[option]},database);
+  expect(await manageEvent(owner,"GET",created!.slug,undefined,database)).toMatchObject({seatingLayout,ticketTypes:[{mapPosition:"east"}]});
+  await expect(manageEvent(owner,"POST",undefined,{...data,seatingLayout:{...seatingLayout,enabled:false},ticketTypes:[option]},database)).rejects.toMatchObject({status:400});
+  await expect(manageEvent(owner,"POST",undefined,{...data,seatingLayout:{...seatingLayout,template:"official"}},database)).rejects.toThrow();
+  await expect(manageEvent(owner,"POST",undefined,{...data,ticketTypes:[{...option,mapPosition:"outside"}]},database)).rejects.toThrow();
+});
+it("reuses immutable own venues while isolating foreign venue associations",async()=>{
+  const data={...input(),venueName:"Mi recinto único"};
+  const first=await manageEvent(owner,"POST",undefined,data,database);
+  const second=await manageEvent(owner,"POST",undefined,data,database);
+  const rows=(await pg.query<{venue_id:string}>(`select venue_id from event where id in ('${first!.id}','${second!.id}')`)).rows;
+  expect(rows[0].venue_id).toBe(rows[1].venue_id);
+  await manageEvent(owner,"PATCH",second!.slug,{...data,address:"Otra avenida 999"},database);
+  expect(await manageEvent(owner,"GET",first!.slug,undefined,database)).toMatchObject({address:data.address});
+});
+it("rejects configuration changes and deletion during active holds but permits a cover update",async()=>{
+  const data=input();const created=await manageEvent(owner,"POST",undefined,data,database);
+  await pg.exec(`insert into seat_hold(event_id,ticket_type_id,zone_key,row_key,row_label,seat_number,owner_token_hash,expires_at) select '${created!.id}',id,'platea','a','A',1,repeat('a',64),now()+interval '60 seconds' from ticket_type where event_id='${created!.id}'`);
+  await expect(manageEvent(owner,"PATCH",created!.slug,{...data,name:"Cambio bloqueado"},database)).rejects.toMatchObject({status:409});
+  await expect(manageEvent(owner,"DELETE",created!.slug,undefined,database)).rejects.toMatchObject({status:409});
+  await manageEvent(owner,"PATCH",created!.slug,{imageUrl:"https://cdn.example.com/new.jpg"},database);
+  await pg.exec(`update seat_hold set created_at=now()-interval '2 minutes',expires_at=now()-interval '1 minute' where event_id='${created!.id}'`);
+  await manageEvent(owner,"PATCH",created!.slug,{...data,name:"Ya libre"},database);
+  expect((await pg.query(`select * from seat_hold where event_id='${created!.id}'`)).rows).toHaveLength(0);
+  await manageEvent(owner,"DELETE",created!.slug,undefined,database);
+});
+
+it("restricts venue catalogue to own associated venues and current events permissions",async()=>{
+  const ownData={...input(),venueName:"Privado del dueño"};
+  await manageEvent(owner,"POST",undefined,ownData,database);
+  await manageEvent(admin,"POST",undefined,{...input(),venueName:"Privado de administración"},database);
+  const own=await listManagedVenues(owner,database);
+  expect(own.some((venue)=>venue.name===ownData.venueName)).toBe(true);
+  expect(own.some((venue)=>venue.name==="Privado de administración")).toBe(false);
+  expect((await listManagedVenues(admin,database)).some((venue)=>venue.name===ownData.venueName)).toBe(true);
+  await expect(listManagedVenues(customer,database)).rejects.toMatchObject({status:403});
+  await expect(listManagedVenues(other,database)).rejects.toMatchObject({status:403});
+  state.actor=null;
+  expect((await handleVenueListing(new Request("http://localhost/api/venues"))).status).toBe(401);
+  state.actor=await getAccessUser(owner,database);
+  const response=await handleVenueListing(new Request("http://localhost/api/venues"));
+  expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect((await handleVenueListing(new Request("http://localhost/api/venues?organizerId=foreign"))).status).toBe(400);
 });
