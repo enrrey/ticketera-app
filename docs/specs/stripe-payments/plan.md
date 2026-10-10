@@ -1,0 +1,15 @@
+# Payments, Invoicing y vencimiento de reservas
+
+Ejecución en esta sesión solicitada por el usuario: «sigue con las demas tareas». Se reutiliza el diseño aprobado de Ticketera y la guía hosted aceptada del MCP de Stripe. Se trabaja exclusivamente con la cuenta de prueba configurada.
+
+1. Añadir tiempos de reintento/reclamo al inbox mediante migración aditiva. Conservar todas las filas; rollback de aplicación conserva las columnas adicionales.
+2. Crear un adaptador Stripe inyectable: Checkout hosted, importes de BD, una sesión por pedido y clave idempotente durable, comprobante postpago con `invoice_creation`, metadata de pedido/pago sin token invitado. No activar impuestos ni métodos explícitos.
+3. Endpoint de pago con control de propietario/token, origen y reserva vigente. Guardar intento antes de llamar a Stripe para recuperar respuestas perdidas; reutilizar la misma sesión incluso al reintentar una tarjeta fallida.
+4. Procesar inbox con reclamo atómico y lease de 5 minutos, máximo 5 intentos, espera exponencial desde 1 minuto y auditoría sin payload. Consultar Stripe; validar modo, referencias, importe y moneda. Confirmar pago/orden/reservas en transacción. El gancho de tickets opera dentro de esa transacción y aún no emite tickets.
+5. Reembolsar automáticamente cobros posteriores al plazo, con fila y clave idempotente persistidas antes de llamar a Stripe. Registrar factura pagada sin usarla como autorización de venta. Mostrar reembolso pendiente/confirmado al comprador.
+6. Expirar/reconciliar sesiones al vencer las reservas antes de liberar cupo. Mientras exista un intento de pago sin reconciliar, el inventario vencido sigue protegido. Fallos de red mantienen el cupo bloqueado para reintentar; no hay liberación insegura.
+7. Endpoint de tareas protegido por secreto y script local. Webhook sigue limitado a verificar firma y persistir. Documentar scheduler de producción; no desplegar infraestructura en esta tarea.
+8. Botón Pagar y retorno con polling acotado de estado real. Guardar token de invitado en sessionStorage antes de salir; no enviarlo a Stripe ni incorporarlo en query strings. Pedidos pagados nunca muestran «reserva vencida». Comprobante accesible solo al propietario/token.
+9. Pruebas con PostgreSQL aislado y gateway simulado: acceso indebido, reintento tras respuesta perdida, estados fuera de orden, importes discordantes, entrega tardía de pago puntual, frontera del plazo, reembolso, lease/reintentos, protección de cupo y expiración. RTL para botón/retorno. Typecheck, lint, suite y build.
+
+Decisiones técnicas de esta ejecución: Checkout hosted (SDK instalado/API 2026-09-30.endive); expiración nativa por defecto y cierre explícito a los 15 minutos; factura postpago de Stripe sin nueva cobranza; una sesión por orden; timestamp de un evento canónico de éxito obtenido de Stripe, nunca recepción del webhook ni creación de Charge. Orden de pago tardío cancelada; refund pendiente hasta confirmación real. Factura de Stripe no equivale a comprobante tributario peruano. QR/correo, Connect, promociones y despliegue siguen separados.
