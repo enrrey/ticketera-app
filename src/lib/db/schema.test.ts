@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/pglite";
-import { persistStripeEvent } from "@/modules/payments";
+import { persistStripeEvent } from "@/modules/payments/server";
 
 const database = new PGlite();
 const client = drizzle(database);
@@ -34,7 +34,7 @@ afterAll(async () => database.close());
 describe("initial migration integrity", () => {
   it("creates all domain tables with foreign keys and indexes", async () => {
     const tables = await database.query<{ count: number }>("select count(*)::int as count from pg_tables where schemaname='public'");
-    expect(tables.rows[0].count).toBe(29);
+    expect(tables.rows[0].count).toBe(33);
     const constraints = await database.query<{ count: number }>("select count(*)::int as count from pg_constraint where contype='f'");
     expect(constraints.rows[0].count).toBeGreaterThan(30);
     const indexes = await database.query<{ indexname: string }>("select indexname from pg_indexes where schemaname='public'");
@@ -50,10 +50,11 @@ describe("initial migration integrity", () => {
     await expect(database.exec(`update order_item set quantity=0 where id='${itemId}'`)).rejects.toThrow();
     await expect(database.exec(`update "order" set total_cents=999 where id='${userId}'`)).rejects.toThrow();
   });
-  it("gives a reservation exactly fifteen minutes", async () => {
+  it("gives a new reservation exactly ten minutes while retaining legacy durations", async () => {
     await database.exec(`insert into inventory_reservation (order_item_id, quantity) values ('${itemId}', 1)`);
     const result = await database.query<{ seconds: number }>("select extract(epoch from expires_at-created_at)::int as seconds from inventory_reservation");
-    expect(result.rows[0].seconds).toBe(900);
+    expect(result.rows[0].seconds).toBe(600);
+    await database.exec(`update inventory_reservation set expires_at=created_at+interval '15 minutes' where order_item_id='${itemId}'`);
   });
   it("prevents issuing the same unit twice and reusing a QR hash", async () => {
     await expect(database.exec(`insert into ticket (order_item_id, unit_number, qr_token_hash) values ('${itemId}', 1, 'another-hash')`)).rejects.toThrow();

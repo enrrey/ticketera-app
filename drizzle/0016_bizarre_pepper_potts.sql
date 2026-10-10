@@ -1,0 +1,1 @@
+ALTER TABLE "payment" ADD COLUMN "ui_mode" text DEFAULT 'hosted' NOT NULL;

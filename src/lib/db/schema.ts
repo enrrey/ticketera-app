@@ -34,6 +34,12 @@ export const permissions = pgTable("permission", {
   id: id(), name: text("name").notNull().unique(), description: text("description").notNull(),
 });
 
+export const organizerProfiles = pgTable("organizer_profile", {
+  userId: uuid("user_id").primaryKey().references(() => users.id),
+  businessName: text("business_name").notNull(), ruc: text("ruc").notNull(),
+  createdAt: created(), updatedAt: time("updated_at").defaultNow().notNull(),
+}, (t) => [check("organizer_profile_ruc_check", sql`${t.ruc} ~ '^[0-9]{11}$'`)]);
+
 export const rolePermissions = pgTable("role_permission", {
   roleId: uuid("role_id").notNull().references(() => roles.id),
   permissionId: uuid("permission_id").notNull().references(() => permissions.id),
@@ -75,6 +81,7 @@ export const events = pgTable("event", {
   description: text("description").notNull(), category: text("category").notNull(),
   minimumAge: integer("minimum_age").default(0).notNull(), entryInstructions: text("entry_instructions").default("").notNull(),
   status: text("status").default("draft").notNull(), imageUrl: text("image_url"), featured: boolean("featured").default(false).notNull(),
+  seatingLayout: jsonb("seating_layout").$type<{enabled:boolean;template:'stadium'|'theater'|'custom';stagePosition:'north'|'south'}>().default({enabled:false,template:'stadium',stagePosition:'north'}).notNull(),
   venueId: uuid("venue_id").notNull().references(() => venues.id),
   organizerId: uuid("organizer_id").notNull().references(() => users.id),
   createdById: uuid("created_by_id").notNull().references(() => users.id),
@@ -93,6 +100,7 @@ export const ticketTypes = pgTable("ticket_type", {
   description: text("description").default("").notNull(), maxPerOrder: integer("max_per_order").default(6).notNull(),
   peoplePerUnit: integer("people_per_unit").default(1).notNull(),
   seatRows: jsonb("seat_rows").$type<{ label: string; seats: number }[]>().default([]).notNull(),
+  mapPosition: text("map_position").$type<'north'|'south'|'east'|'west'|'center'>().default('west').notNull(),
   capacity: integer("capacity").notNull(), salesStartAt: time("sales_start_at").notNull(),
   salesEndAt: time("sales_end_at").notNull(),
 }, (t) => [index("ticket_type_event_idx").on(t.eventId), unique("ticket_type_id_event_unique").on(t.id, t.eventId), check("ticket_type_values_check", sql`${t.priceCents} >= 0 and ${t.capacity} > 0 and ${t.currency} = 'pen'`), check("ticket_type_seating_check",sql`${t.seatingType} in ('standing','seated','numbered','box') and ${t.maxPerOrder} between 1 and 1000 and ${t.peoplePerUnit} between 1 and 50 and (${t.seatingType}='box' or ${t.peoplePerUnit}=1) and jsonb_typeof(${t.seatRows})='array'`), check("ticket_type_dates_check", sql`${t.salesEndAt} > ${t.salesStartAt}`)]);
@@ -101,6 +109,16 @@ export const ticketTypeSessions = pgTable("ticket_type_session", {
   ticketTypeId: uuid("ticket_type_id").notNull(), eventSessionId: uuid("event_session_id").notNull(),
   eventId: uuid("event_id").notNull(),
 }, (t) => [primaryKey({ columns: [t.ticketTypeId, t.eventSessionId] }), index("ticket_type_session_session_idx").on(t.eventSessionId), foreignKey({ columns: [t.ticketTypeId, t.eventId], foreignColumns: [ticketTypes.id, ticketTypes.eventId] }), foreignKey({ columns: [t.eventSessionId, t.eventId], foreignColumns: [eventSessions.id, eventSessions.eventId] })]);
+
+export const seatHolds = pgTable('seat_hold', {
+  id:id(),eventId:uuid('event_id').notNull().references(()=>events.id,{onDelete:'cascade'}),
+  ticketTypeId:uuid('ticket_type_id').notNull(),zoneKey:text('zone_key').notNull(),rowKey:text('row_key').notNull(),
+  rowLabel:text('row_label').notNull(),seatNumber:integer('seat_number').notNull(),ownerTokenHash:text('owner_token_hash').notNull(),
+  createdAt:created(),expiresAt:time('expires_at').default(sql`now() + interval '60 seconds'`).notNull(),
+},t=>[foreignKey({columns:[t.ticketTypeId,t.eventId],foreignColumns:[ticketTypes.id,ticketTypes.eventId]}).onDelete('cascade'),
+  uniqueIndex('seat_hold_physical_unique').on(t.eventId,t.zoneKey,t.rowKey,t.seatNumber),
+  index('seat_hold_owner_idx').on(t.eventId,t.ownerTokenHash),index('seat_hold_expiry_idx').on(t.expiresAt),
+  check('seat_hold_values_check',sql`${t.seatNumber} between 1 and 500 and length(${t.rowLabel}) between 1 and 20 and length(${t.ownerTokenHash})=64 and ${t.expiresAt}>${t.createdAt}`)]);
 
 export const promotions = pgTable("promotion", {
   id: id(), eventId: uuid("event_id").notNull().references(() => events.id),
@@ -117,10 +135,13 @@ export const promotionTicketTypes = pgTable("promotion_ticket_type", {
 export const orders = pgTable("order", {
   id: id(), userId: uuid("user_id").references(() => users.id),
   buyerEmail: text("buyer_email").notNull(), buyerName: text("buyer_name").notNull(),
+  buyerDocumentType: text("buyer_document_type"), buyerDocumentEncrypted: text("buyer_document_encrypted"), buyerPhone: text("buyer_phone"),
+  termsVersion: text("terms_version"), termsAcceptedAt: time("terms_accepted_at"),
   status: text("status").default("pending").notNull(), currency: currency(),
   subtotalCents: integer("subtotal_cents").notNull(), discountCents: integer("discount_cents").default(0).notNull(),
   totalCents: integer("total_cents").notNull(), stripeCustomerId: text("stripe_customer_id"),
   accessTokenHash: text("access_token_hash").unique(),
+  confirmationTokenHash: text("confirmation_token_hash").unique(),
   createdAt: created(), updatedAt: time("updated_at").defaultNow().notNull(),
 }, (t) => [index("order_user_idx").on(t.userId), index("order_guest_email_idx").on(t.buyerEmail).where(sql`${t.userId} is null`), index("order_status_created_idx").on(t.status, t.createdAt), check("order_totals_check", sql`${t.subtotalCents} >= 0 and ${t.discountCents} >= 0 and ${t.discountCents} <= ${t.subtotalCents} and ${t.totalCents} = ${t.subtotalCents} - ${t.discountCents} and ${t.currency} = 'pen'`), check("order_status_check", sql`${t.status} in ('pending', 'paid', 'expired', 'cancelled', 'partially_refunded', 'refunded')`)]);
 
@@ -136,13 +157,22 @@ export const orderPromotions = pgTable("order_promotion", {
   discountCents: integer("discount_cents").notNull(),
 }, (t) => [primaryKey({ columns: [t.orderId, t.promotionId] }), index("order_promotion_promotion_idx").on(t.promotionId), check("order_promotion_discount_check", sql`${t.discountCents} >= 0`)]);
 
+export const orderItemSeats = pgTable("order_item_seat", {
+  orderItemId: uuid("order_item_id").notNull().references(() => orderItems.id),
+  unitNumber: integer("unit_number").notNull(),
+  rowLabel: text("row_label").notNull(), seatNumber: integer("seat_number").notNull(),
+}, (t) => [primaryKey({ columns: [t.orderItemId, t.unitNumber] }),
+  uniqueIndex("order_item_seat_position_unique").on(t.orderItemId, t.rowLabel, t.seatNumber),
+  check("order_item_seat_values_check", sql`${t.unitNumber} > 0 and ${t.seatNumber} > 0 and length(trim(${t.rowLabel})) between 1 and 20`)]);
+
 export const inventoryReservations = pgTable("inventory_reservation", {
   id: id(), orderItemId: uuid("order_item_id").notNull().references(() => orderItems.id),
   quantity: integer("quantity").notNull(), status: text("status").default("active").notNull(),
-  createdAt: created(), expiresAt: time("expires_at").default(sql`now() + interval '15 minutes'`).notNull(),
-}, (t) => [index("reservation_item_idx").on(t.orderItemId), index("reservation_expiry_idx").on(t.status, t.expiresAt), check("reservation_values_check", sql`${t.quantity} > 0 and ${t.expiresAt} = ${t.createdAt} + interval '15 minutes'`), check("reservation_status_check", sql`${t.status} in ('active', 'converted', 'released')`)]);
+  createdAt: created(), expiresAt: time("expires_at").default(sql`now() + interval '10 minutes'`).notNull(),
+}, (t) => [index("reservation_item_idx").on(t.orderItemId), index("reservation_expiry_idx").on(t.status, t.expiresAt), check("reservation_values_check", sql`${t.quantity} > 0 and (${t.expiresAt} = ${t.createdAt} + interval '10 minutes' or ${t.expiresAt} = ${t.createdAt} + interval '15 minutes')`), check("reservation_status_check", sql`${t.status} in ('active', 'converted', 'released')`)]);
 
 export const payments = pgTable("payment", {
+  uiMode: text("ui_mode").$type<'hosted'|'elements'>().default('hosted').notNull(),
   id: id(), orderId: uuid("order_id").notNull().references(() => orders.id),
   stripePaymentIntentId: text("stripe_payment_intent_id").unique(), stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
   stripeChargeId: text("stripe_charge_id").unique(), idempotencyKey: text("idempotency_key").notNull().unique(),
@@ -167,6 +197,7 @@ export const refunds = pgTable("refund", {
   stripeRefundId: text("stripe_refund_id").unique(), idempotencyKey: text("idempotency_key").notNull().unique(),
   amountCents: integer("amount_cents").notNull(), status: text("status").default("pending").notNull(),
   reason: text("reason").notNull(), createdAt: created(), updatedAt: time("updated_at").defaultNow().notNull(),
+  attempts: integer("attempts").default(0).notNull(), nextAttemptAt: time("next_attempt_at").defaultNow().notNull(),
 }, (t) => [index("refund_payment_idx").on(t.paymentId), index("refund_status_idx").on(t.status), check("refund_amount_check", sql`${t.amountCents} > 0`), check("refund_status_check", sql`${t.status} in ('pending', 'requires_action', 'succeeded', 'failed', 'cancelled')`)]);
 
 export const refundTickets = pgTable("refund_ticket", {
@@ -201,7 +232,18 @@ export const webhookEvents = pgTable("webhook_event", {
   // Store only the provider object reference; workers retrieve canonical data from Stripe.
   objectId: text("object_id").notNull(), livemode: boolean("livemode").notNull(),
   providerCreatedAt: time("provider_created_at").notNull(), createdAt: created(), processedAt: time("processed_at"),
-}, (t) => [uniqueIndex("webhook_provider_event_unique").on(t.provider, t.externalEventId), index("webhook_pending_idx").on(t.status, t.createdAt), check("webhook_provider_check", sql`${t.provider} in ('stripe', 'clerk')`), check("webhook_status_check", sql`${t.status} in ('pending', 'processing', 'processed', 'failed')`), check("webhook_attempts_check", sql`${t.attempts} >= 0`)]);
+  nextAttemptAt: time("next_attempt_at").defaultNow().notNull(), claimedAt: time("claimed_at"), claimToken: uuid("claim_token"),
+}, (t) => [uniqueIndex("webhook_provider_event_unique").on(t.provider, t.externalEventId), index("webhook_pending_idx").on(t.status, t.createdAt), index("webhook_retry_idx").on(t.provider, t.status, t.nextAttemptAt), check("webhook_provider_check", sql`${t.provider} in ('stripe', 'clerk')`), check("webhook_status_check", sql`${t.status} in ('pending', 'processing', 'processed', 'failed')`), check("webhook_attempts_check", sql`${t.attempts} >= 0`)]);
+
+export const notificationOutbox = pgTable("notification_outbox", {
+  id: id(), orderId: uuid("order_id").notNull().unique().references(() => orders.id, { onDelete: "cascade" }),
+  status: text("status").default("pending").notNull(), attempts: integer("attempts").default(0).notNull(),
+  encryptedPayload: text("encrypted_payload"), providerMessageId: text("provider_message_id"),
+  nextAttemptAt: time("next_attempt_at").defaultNow().notNull(), firstAttemptAt: time("first_attempt_at"),
+  claimedAt: time("claimed_at"), claimToken: uuid("claim_token"), sentAt: time("sent_at"), createdAt: created(),
+}, (t) => [index("notification_retry_idx").on(t.status,t.nextAttemptAt),
+  check("notification_status_check",sql`${t.status} in ('pending','processing','sent','failed','cancelled')`),
+  check("notification_attempts_check",sql`${t.attempts} >= 0`)]);
 
 export const auditLogs = pgTable("audit_log", {
   id: id(), actorId: uuid("actor_id").references(() => users.id), action: text("action").notNull(),
