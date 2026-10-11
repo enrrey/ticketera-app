@@ -24,6 +24,8 @@ La ejecución local del worker fue rechazada por revisión automática: puede ce
 
 ## Verificación
 
+Ampliación posterior: métricas por evento y tipo de entrada, con paginación de 50 filas, ventas históricas después de descuentos, entradas vigentes, disponibilidad y check-ins. Reutiliza las reglas de inventario y permisos de propietario/global. Sus 9 pruebas en 3 archivos pasan con `--pool=threads --maxWorkers=1`; lint focalizado y TypeScript pasan. Build actualizado pasa después de repetirlo con permisos para iniciar procesos (primer intento: `spawn EPERM`). La suite de 318 pruebas indicada abajo corresponde a la integración anterior a esta ampliación.
+
 - `npm test -- --maxWorkers=2`: **67 archivos, 318 pruebas, cero fallos**, 292.43 segundos.
 - `npm run typecheck`: pasa.
 - `npm run lint`: pasa; comprobación final repetida después de integración.

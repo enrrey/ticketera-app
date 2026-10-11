@@ -1,2 +1,3 @@
 export { ReportingDashboard } from "./components/ReportingDashboard";
-export type { DashboardMetrics } from "./types";
+export { TicketTypeMetricsTable } from "./components/TicketTypeMetricsTable";
+export type { DashboardMetrics, TicketTypeMetrics, TicketTypeMetricsPage } from "./types";
