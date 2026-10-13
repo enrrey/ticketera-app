@@ -43,3 +43,13 @@ Cancelación se integra en el CRUD como operación específica, antes de bloquea
 La revisión final independiente no encontró defectos concretos P0/P1/P2 en pagos, inventario, lectura de pedidos, reembolsos, métricas y estado Connect. Fue estática: no acredita comportamiento externo de Stripe/Resend ni concurrencia de producción.
 
 No se desplegó, envió correo, pagó una compra ni consumió QR real durante esta integración. La auditoría de dependencias de la tarjeta 16 sigue pendiente; no se aplicó `audit fix --force`.
+
+## Continuación 2026-10-12
+
+El usuario pospuso Google Cloud y publicación para probar primero localhost. Preparación local Docker/CI/documentación conservada como pendiente, sin activar standalone ni desplegar; el motor Docker no estaba disponible. Promociones permanece pendiente, con decisión explícita de permitir acumulación; diseño en `docs/specs/promotions/spec.md`.
+
+`npm audit --json` de esta fecha devuelve cero vulnerabilidades; el resultado anterior es histórico y no se aplicó ninguna actualización forzada. La revisión estática detectó ausencia de límite de cuerpo JSON y de limitación compartida de reservas anónimas. Se corrigió el primer punto en checkout, selección de asientos y check-in con lectura streaming limitada a 1 MiB, conteo real de bytes, cancelación y respuesta 413. Las peticiones inválidas conservan 400. Verificación focalizada: 24 pruebas en 5 archivos pasan y TypeScript pasa. Rate limiting distribuido permanece pendiente; no se declara la seguridad transversal completa.
+
+El navegador automatizado volvió a fallar al inicializar sus recursos; la guía de pruebas manuales está en `manual-testing.md`. Worker aún detenido hasta autorización explícita de sus operaciones de vencimiento/devolución. No hubo cambios de datos ni operaciones externas durante esta continuación.
+
+Verificación final de la corrección del 2026-10-12: lint focalizado, TypeScript y build de producción pasan. Las 24 pruebas focalizadas pasan; no se volvió a ejecutar la suite completa anterior.

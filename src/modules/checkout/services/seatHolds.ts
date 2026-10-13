@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getDatabase } from '@/lib/db';
 import { events,seatHolds,ticketTypes } from '@/lib/db/schema';
 import { isSameOrigin } from '@/lib/sameOrigin';
+import { readRequestJson, RequestBodyTooLargeError } from '@/lib/requestBody';
 import { generateAccessToken,hashAccessToken } from './accessToken';
 import { heldEventSeats,normalizeSeatLabel,occupiedEventSeats,seatKey } from './seatAvailability';
 
@@ -80,9 +81,10 @@ export async function handleSeatHolds(request:Request,slug:string){
       if(!token)throw new SeatHoldError(400,'invalid_token','Falta el token de selección');
       await releaseSeatHolds(slug,token);return new Response(null,{status:204,headers});
     }
-    const input=seatHoldSchema.parse(await request.json());
+    const input=seatHoldSchema.parse(await readRequestJson(request));
     return Response.json(await replaceSeatHolds(slug,input,token),{headers});
   }catch(error){
+    if(error instanceof RequestBodyTooLargeError)return Response.json({error:error.message,code:'body_too_large'},{status:413,headers});
     const invalid=error instanceof z.ZodError||error instanceof SyntaxError;
     return Response.json({error:error instanceof SeatHoldError?error.message:invalid?'Revisa los asientos seleccionados':'No pudimos reservar los asientos',code:error instanceof SeatHoldError?error.code:invalid?'invalid_seats':'unavailable'},
       {status:error instanceof SeatHoldError?error.status:invalid?400:503,headers});

@@ -10,6 +10,13 @@ const post = (payload: unknown, origin: string | null = "http://localhost:3000")
 const created = { orderId: "o1", status: "pending", totalCents: 10000, currency: "pen", expiresAt: "2026-10-05T00:15:00.000Z", serverTime: "2026-10-05T00:00:00.000Z", expired: false, items: [] };
 
 describe("POST /api/checkout", () => {
+  it("rejects oversized bodies before creating an order or reading identity", async () => {
+    const create = vi.fn(); const getMember = vi.fn();
+    const response = await handleCreateCheckout(post(' '.repeat(1024 * 1024 + 1)), { create, getMember });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "El cuerpo de la solicitud es demasiado grande" });
+    expect(create).not.toHaveBeenCalled(); expect(getMember).not.toHaveBeenCalled();
+  });
   it('requires identity details and explicit current-version consent for new public orders',async()=>{
     const create=vi.fn();const getMember=async()=>null;
     expect((await handleCreateCheckout(post({...body,acceptedTerms:false}),{create,getMember})).status).toBe(400);

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isSameOrigin } from "@/lib/sameOrigin";
+import { readRequestJson, RequestBodyTooLargeError } from "@/lib/requestBody";
 import { getCurrentAccessUser } from "@/modules/identity-access";
 import type { CheckoutErrorBody, CheckoutSummary, CreatedCheckout } from "../types";
 import { publicCheckoutSchema, type CheckoutInput } from "./checkoutSchema";
@@ -20,10 +21,11 @@ export async function handleCreateCheckout(
 ) {
   if (!isSameOrigin(request)) return json({ error: "Origen no permitido" }, 403);
   try {
-    const input = publicCheckoutSchema.parse(await request.json());
+    const input = publicCheckoutSchema.parse(await readRequestJson(request));
     const created = await create(input, await getMember());
     return json(created, 201);
   } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) return json({ error: error.message }, 413);
     if (error instanceof CheckoutError) return json({ error: error.message, code: error.code, ...(error.details ? { details: error.details } : {}) }, error.status);
     if (error instanceof z.ZodError || error instanceof SyntaxError) return json({ error: "Revisa los datos de la compra" }, 400);
     return json({ error: "No pudimos reservar tus entradas. Inténtalo de nuevo." }, 503);
