@@ -31,9 +31,9 @@ El objetivo operativo es menos de $10 al mes en pruebas ligeras, conservando mar
 
 - [x] Revisión inicial y diagnóstico de región.
 - [x] ECR / IAM / CloudWatch.
-- [ ] Imagen Linux construida y probada.
-- [ ] Lambda, alias y URL.
-- [ ] Comprobaciones remotas.
+- [x] Imagen Linux construida y probada.
+- [x] Lambda, alias y URL protegida por AWS_IAM.
+- [x] Comprobaciones remotas mediante invocaciones autenticadas.
 - [ ] GitHub OIDC / CD.
 - [ ] Webhook Stripe remoto: pendiente de la URL y configuración del usuario.
 
@@ -59,5 +59,61 @@ Siguiente paso: construir la imagen en GitHub sin credenciales AWS, descargar el
 Se preparó `.github/workflows/build-demo-image.yml`: ejecución manual, imagen Linux amd64, smoke test de archivo estático con filesystem de solo lectura y datos privados ficticios, artifact con retención de un día. YAML analizado correctamente; aún no se subió ni ejecutó. No comprueba pagos o base de datos.
 
 El perfil local `ticketera` ya tiene `us-east-2` como región predeterminada. CloudWatch confirma retención de tres días y cero bytes almacenados al terminar la revisión inicial.
+
+## Instalación y validación completadas
+
+- GitHub CLI autenticado oficialmente como `enrrey`; no se reutilizó el token del gestor de Git. Repositorio público.
+- Commit `ed202bf` publicado en `main`. CI [38995825675](https://github.com/enrrey/ticketera-app/actions/runs/38995825675): lint, generación de tipos Next, TypeScript, **338 pruebas en 72 archivos** y build aprobados. Se corrigió el orden de CI: `next typegen` antes de `tsc`, necesario para `LayoutProps` en un checkout limpio.
+- [Compilación de imagen 38995828040](https://github.com/enrrey/ticketera-app/actions/runs/38995828040) aprobada, incluyendo arranque Linux con filesystem de solo lectura y `/tmp` escribible. Artefacto privado de configuración: ninguno; solo claves públicas sandbox y datos sintéticos en la prueba.
+- La imagen se descargó y publicó con `crane` v0.22.1 desde su release oficial, con checksum verificado. Login estándar de ECR usando contraseña temporal; su archivo de autenticación se eliminó al finalizar.
+- Imagen ECR `ticketera-demo:bootstrap-ed202bf-38995828040`, digest `sha256:a50c0916ae4685e69ae5c248058cf57aca01d5b588a69922b3f9b14f3281f28f`, tamaño registrado 114100235 bytes (aprox. 109 MiB). Mantener una sola imagen inicial.
+- Lambda `ticketera-demo`, versión **2**, alias **demo**: activa, 1024 MiB, timeout 30 segundos, concurrencia reservada **2**, `/tmp` 512 MiB, sin VPC ni concurrencia provisionada. La versión 1 es un paso de bootstrap con APP_URL provisional; no usarla como rollback funcional.
+- URL estable: `https://fpskq5ovziao23pldimhdimskm0zqdav.lambda-url.us-east-2.on.aws/`.
+- **La URL todavía usa AWS_IAM**. Un navegador sin firma AWS no puede abrirla y Stripe no puede entregar eventos todavía. No se aplicó ninguna política de acceso anónimo. La revisión automática rechazó `AuthType=NONE` por necesitar confirmación explícita; queda pendiente esa autorización.
+- APP_URL ya coincide con esa URL. Las variables privadas están solo en Lambda, nunca en la imagen o GitHub. Correos forzados a false. Se omitieron deliberadamente ambos secretos de webhook: deben corresponder a los nuevos endpoints remotos, no al listener local.
+- La API Free Tier reportó posteriormente **USD 120 disponibles**, todavía plan FREE activo. Mantener el objetivo de diseño basado en USD 100 y menos de USD 10/mes; los datos de facturación no son instantáneos.
+
+### Pruebas sobre la versión desplegada
+
+Invocaciones autenticadas de Lambda con eventos HTTP v2, sin compras ni pagos:
+
+| Ruta | Resultado |
+|---|---|
+| GET `/api/health` | 200, `status: ok` |
+| GET `/` | 200 |
+| GET `/api/events` | 200, dos eventos publicados desde Neon |
+| GET `/api/events?scope=organizer` sin sesión | 401 |
+| GET `/api/admin/users` sin sesión | 401 |
+| GET `/ingresar` | 200 |
+| GET `/organizador` sin sesión | 307 a ingreso |
+| POST `/api/webhooks/stripe` sin configurar | 503, cerrado |
+| POST `/api/webhooks/clerk` sin configurar | 503, cerrado |
+
+Estas verificaciones no prueban OAuth en el navegador, selección/compra, 3DS, webhook ni emisión de entradas remotas. Esos pasos esperan la apertura autorizada de la URL y la configuración del proveedor. El procesador financiero permanece detenido.
+
+## Pausa y reanudación manual
+
+Pausar la ejecución fuera de las sesiones de prueba:
+
+```powershell
+aws lambda put-function-concurrency --function-name ticketera-demo --reserved-concurrent-executions 0 --profile ticketera --region us-east-2
+```
+
+Reanudar con el límite inicial:
+
+```powershell
+aws lambda put-function-concurrency --function-name ticketera-demo --reserved-concurrent-executions 2 --profile ticketera --region us-east-2
+```
+
+Con concurrencia cero las peticiones se rechazan; no se borran datos y el almacenamiento ECR sigue existiendo. No cambiar el plan gratuito, activar características avanzadas ni retirar políticas para solucionar CD. El presupuesto mensual de USD 10 no pausa automáticamente Lambda.
+
+## Pendientes exactos
+
+1. Confirmación explícita para cambiar AuthType a NONE y permitir invocación pública **únicamente a través de la Function URL**, sobre el alias demo. Clerk y permisos de aplicación permanecen obligatorios en sus rutas.
+2. Abrir la URL en navegador y comprobar login Clerk; ajustar las opciones de desarrollo/orígenes del proveedor solo si hace falta.
+3. Crear endpoint Stripe sandbox `https://fpskq5ovziao23pldimhdimskm0zqdav.lambda-url.us-east-2.on.aws/api/webhooks/stripe`, guardar el nuevo signing secret directamente en configuración segura y probar la entrega firmada. No reutilizar el secreto local.
+4. Configurar el endpoint Clerk remoto si se van a probar sus eventos.
+5. Autorizar por separado cualquier ejecución del procesador de pagos que pueda expirar reservas o reembolsar operaciones de prueba.
+6. CD OIDC sigue restringido por AWS Projects. CI y build manual funcionan; no se presenta el despliegue automático como operativo.
 
 Fuentes: [regiones de AWS Projects](https://docs.aws.amazon.com/accounts/latest/reference/project-regions.html), [políticas administradas](https://docs.aws.amazon.com/accounts/latest/reference/scps-and-rcps-for-projects.html).
