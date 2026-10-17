@@ -7,7 +7,7 @@ Fecha de inicio: 2026-10-16. Diseño autorizado: [aws-demo.md](aws-demo.md).
 1. Confirmar cuenta, crédito, región y cuotas sin modificar recursos.
 2. Crear ECR, rol de ejecución y logs con retención de tres días.
 3. Construir la imagen localmente y probar el contenedor antes de publicarlo.
-4. Crear Lambda con 1 GiB, timeout de 30 segundos y concurrencia reservada de 2; sin VPC ni concurrencia provisionada.
+4. Crear Lambda con 1 GiB, timeout de 30 segundos y concurrencia reservada (propuesta inicial 2; valor validado en navegador 5); sin VPC ni concurrencia provisionada.
 5. Crear alias `demo` y URL HTTPS. Cargar únicamente variables necesarias desde los archivos locales, sin incluirlas en imágenes, Git ni salidas.
 6. Comprobar salud, landing, catálogo y protección de rutas. Entregar URL para configurar el webhook Stripe sandbox; no copiar el secreto del listener local como secreto remoto.
 7. Conectar GitHub Actions con OIDC y límites de permisos cuando la autenticación GitHub esté disponible.
@@ -32,7 +32,7 @@ El objetivo operativo es menos de $10 al mes en pruebas ligeras, conservando mar
 - [x] Revisión inicial y diagnóstico de región.
 - [x] ECR / IAM / CloudWatch.
 - [x] Imagen Linux construida y probada.
-- [x] Lambda, alias y URL protegida por AWS_IAM.
+- [x] Lambda, alias y URL pública autorizada.
 - [x] Comprobaciones remotas mediante invocaciones autenticadas.
 - [ ] GitHub OIDC / CD.
 - [ ] Webhook Stripe remoto: pendiente de la URL y configuración del usuario.
@@ -67,9 +67,9 @@ El perfil local `ticketera` ya tiene `us-east-2` como región predeterminada. Cl
 - [Compilación de imagen 38995828040](https://github.com/enrrey/ticketera-app/actions/runs/38995828040) aprobada, incluyendo arranque Linux con filesystem de solo lectura y `/tmp` escribible. Artefacto privado de configuración: ninguno; solo claves públicas sandbox y datos sintéticos en la prueba.
 - La imagen se descargó y publicó con `crane` v0.22.1 desde su release oficial, con checksum verificado. Login estándar de ECR usando contraseña temporal; su archivo de autenticación se eliminó al finalizar.
 - Imagen ECR `ticketera-demo:bootstrap-ed202bf-38995828040`, digest `sha256:a50c0916ae4685e69ae5c248058cf57aca01d5b588a69922b3f9b14f3281f28f`, tamaño registrado 114100235 bytes (aprox. 109 MiB). Mantener una sola imagen inicial.
-- Lambda `ticketera-demo`, versión **2**, alias **demo**: activa, 1024 MiB, timeout 30 segundos, concurrencia reservada **2**, `/tmp` 512 MiB, sin VPC ni concurrencia provisionada. La versión 1 es un paso de bootstrap con APP_URL provisional; no usarla como rollback funcional.
+- Lambda `ticketera-demo`, versión **2**, alias **demo**: activa, 1024 MiB, timeout 30 segundos, concurrencia reservada **5** (inicialmente 2; ajuste validado en navegador), `/tmp` 512 MiB, sin VPC ni concurrencia provisionada. La versión 1 es un paso de bootstrap con APP_URL provisional; no usarla como rollback funcional.
 - URL estable: `https://fpskq5ovziao23pldimhdimskm0zqdav.lambda-url.us-east-2.on.aws/`.
-- **La URL todavía usa AWS_IAM**. Un navegador sin firma AWS no puede abrirla y Stripe no puede entregar eventos todavía. No se aplicó ninguna política de acceso anónimo. La revisión automática rechazó `AuthType=NONE` por necesitar confirmación explícita; queda pendiente esa autorización.
+- Inicialmente la URL usó AWS_IAM y se comprobó su 403 anónimo. Posteriormente el usuario autorizó expresamente su apertura: el estado actual es AuthType NONE, con permisos limitados a Function URL, descritos debajo.
 - APP_URL ya coincide con esa URL. Las variables privadas están solo en Lambda, nunca en la imagen o GitHub. Correos forzados a false. Se omitieron deliberadamente ambos secretos de webhook: deben corresponder a los nuevos endpoints remotos, no al listener local.
 - La API Free Tier reportó posteriormente **USD 120 disponibles**, todavía plan FREE activo. Mantener el objetivo de diseño basado en USD 100 y menos de USD 10/mes; los datos de facturación no son instantáneos.
 
@@ -99,18 +99,30 @@ Pausar la ejecución fuera de las sesiones de prueba:
 aws lambda put-function-concurrency --function-name ticketera-demo --reserved-concurrent-executions 0 --profile ticketera --region us-east-2
 ```
 
-Reanudar con el límite inicial:
+Reanudar con el límite validado en navegador:
 
 ```powershell
-aws lambda put-function-concurrency --function-name ticketera-demo --reserved-concurrent-executions 2 --profile ticketera --region us-east-2
+aws lambda put-function-concurrency --function-name ticketera-demo --reserved-concurrent-executions 5 --profile ticketera --region us-east-2
 ```
 
 Con concurrencia cero las peticiones se rechazan; no se borran datos y el almacenamiento ECR sigue existiendo. No cambiar el plan gratuito, activar características avanzadas ni retirar políticas para solucionar CD. El presupuesto mensual de USD 10 no pausa automáticamente Lambda.
 
+## Apertura pública autorizada
+
+El usuario autorizó explícitamente el acceso público el 2026-10-16. Se cambió el AuthType del alias `demo` de AWS_IAM a NONE y se agregaron dos permisos sobre **ese alias**:
+
+- `lambda:InvokeFunctionUrl`, condicionado a `lambda:FunctionUrlAuthType=NONE`.
+- `lambda:InvokeFunction`, condicionado a `lambda:InvokedViaFunctionUrl=true`; no permite Lambda Invoke anónimo por otros medios.
+
+No se cambiaron roles de aplicación, credenciales, plan, presupuesto ni workers. La concurrencia inicial de 2 produjo 19 errores 429 al cargar CSS, fuentes y scripts en paralelo en un navegador nuevo. Se ajustó a 5; la siguiente carga con una sesión nueva pasó sin errores de consola. Sigue sin concurrencia provisionada ni costo de cómputo en reposo; el límite no equivale a un tope monetario.
+
+Comprobaciones HTTP por la URL real: `/api/health`, `/`, `/ingresar` y `/api/events` responden 200 (dos eventos); APIs de organizador/admin sin sesión responden 401; `/organizador` redirige con 307; webhook Stripe sin secreto remoto devuelve 503. La prueba autenticada anterior sigue siendo evidencia adicional de la versión 2. La URL ya no debe devolver 403 a visitantes por falta de firma AWS.
+
+Revisión visual con Playwright, sesión nueva y viewport 1440×900: landing con estilos, scripts e imágenes correctos, cero imágenes rotas y cero errores de consola; queda el aviso esperado de Clerk por claves de desarrollo. `/ingresar` carga el widget real con `Continue with Google` y campo de correo. No se inició sesión con la cuenta del usuario, no se creó una compra y no se ejecutó el procesador financiero. Captura local ignorada: `output/playwright/aws-landing.png`.
+
 ## Pendientes exactos
 
-1. Confirmación explícita para cambiar AuthType a NONE y permitir invocación pública **únicamente a través de la Function URL**, sobre el alias demo. Clerk y permisos de aplicación permanecen obligatorios en sus rutas.
-2. Abrir la URL en navegador y comprobar login Clerk; ajustar las opciones de desarrollo/orígenes del proveedor solo si hace falta.
+1. Prueba del login Clerk con una cuenta del usuario; el formulario y sus recursos ya se verificaron visualmente. Ajustar las opciones de desarrollo/orígenes del proveedor solo si hace falta.
 3. Crear endpoint Stripe sandbox `https://fpskq5ovziao23pldimhdimskm0zqdav.lambda-url.us-east-2.on.aws/api/webhooks/stripe`, guardar el nuevo signing secret directamente en configuración segura y probar la entrega firmada. No reutilizar el secreto local.
 4. Configurar el endpoint Clerk remoto si se van a probar sus eventos.
 5. Autorizar por separado cualquier ejecución del procesador de pagos que pueda expirar reservas o reembolsar operaciones de prueba.
