@@ -15,6 +15,7 @@ describe('order confirmation outbox', () => {
   beforeEach(async () => {
     await ctx.db.delete(notificationOutbox);
     vi.stubEnv('QR_SIGNING_SECRET', 'ab'.repeat(32));
+    vi.stubEnv('NOTIFICATIONS_ENABLED', 'true');
     vi.stubEnv('RESEND_API_KEY', 'test-key');
     vi.stubEnv('RESEND_FROM_EMAIL', 'Tickets <tickets@example.com>');
     vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://tickets.example.com');
@@ -61,6 +62,21 @@ describe('order confirmation outbox', () => {
     vi.stubEnv('RESEND_API_KEY', '');
     expect(await processNotificationOutbox({ database: ctx.db })).toMatchObject({ configured: false });
     expect((await ctx.db.select().from(notificationOutbox))[0]).toMatchObject({ status: 'pending', attempts: 0 });
+  });
+  it.each([undefined, 'false'])('keeps queued confirmations untouched when notifications are %s despite provider credentials', async enabled => {
+    const paid = await order();
+    await enqueueOrderConfirmation(ctx.db, paid.id);
+    const before = await ctx.db.select().from(notificationOutbox);
+    const [orderBefore] = await ctx.db.select().from(orders).where(eq(orders.id, paid.id));
+    vi.stubEnv('NOTIFICATIONS_ENABLED', enabled);
+    const gateway = { send: vi.fn(async () => 'must-not-send') };
+
+    expect(await processNotificationOutbox({ database: ctx.db, gateway })).toEqual({ configured: false, sent: 0, retried: 0, failed: 0, cancelled: 0 });
+    expect(gateway.send).not.toHaveBeenCalled();
+    expect(await ctx.db.select().from(notificationOutbox)).toEqual(before);
+    const [orderAfter] = await ctx.db.select().from(orders).where(eq(orders.id, paid.id));
+    expect(orderAfter.confirmationTokenHash).toBe(orderBefore.confirmationTokenHash);
+    expect(orderAfter.accessTokenHash).toBe(paid.accessTokenHash);
   });
   it('commits tickets and outbox together only with a captured payment', async () => {
     const paid = await order();

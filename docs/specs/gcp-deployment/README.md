@@ -1,5 +1,7 @@
 # Preparación de despliegue GCP
 
+> Histórico desde el 2026-10-14: el usuario corrigió el proveedor a AWS y aclaró que será una demo con sandbox, sin correos y $100 de crédito. Usar la [arquitectura AWS demo](../../architecture/aws-demo.md); este documento no es la guía de despliegue vigente.
+
 Estado: empaquetado local y CI preparados; producción pendiente de proyecto, dominio y política de retención. Región aprobada: `southamerica-east1`. No se han creado recursos ni publicado imágenes. Este documento complementa las decisiones de `docs/specs/ticketing-system-design/spec.md` y no cambia la política del negocio.
 
 ## Imagen local

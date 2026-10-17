@@ -1,6 +1,7 @@
 # System Design — Arquitectura y MER de Ticketera
 
 > **Estado:** APROBADO  
+> **Actualización 2026-10-14:** el usuario eligió **AWS para una demo académica**, sin venta real, con credenciales sandbox, sin correos y con $100 de crédito. [Arquitectura demo y CI/CD propuestos](../../architecture/aws-demo.md). Route 53 es opcional; no se usarán WAF ni balanceador en esta etapa. Esto sustituye las referencias históricas a producción GCP y la primera propuesta AWS/Fargate. Región y aprovisionamiento se concretan antes del despliegue.
 > **Actualización 2026-10-10:** el usuario autorizó completar las pantallas y trece tareas del profesor. [Especificación complementaria](../professor-parity/spec.md): reservas nuevas de 10 minutos (las anteriores mantienen su vencimiento), compra por pasos con Checkout Elements, elección individual de asientos (reemplaza la decisión histórica 11), perfil de negocio, métricas y reembolsos. Connect requiere país legal y elegibilidad por confirmar; entrega de correo requiere remitente verificado. Estas condiciones reemplazan las menciones históricas de reserva de 15 minutos para pedidos nuevos.
 > **Aprobado por:** Usuario (ronaldreyesramirez@gmail.com), 2026-10-05, incluyendo las decisiones de §9.1.  
 > **Autorización de implementación parcial:** el usuario aprobó usar este MER y elegir ORM con «ok procede» para crear tablas, relaciones, índices y recepción de webhooks Stripe. El resto de decisiones pendientes conserva su estado.
