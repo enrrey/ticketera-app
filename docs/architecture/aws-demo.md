@@ -2,6 +2,8 @@
 
 Fecha: 2026-10-14. **Demo académica, credenciales de prueba y presupuesto total disponible de $100 en créditos. No es un diseño para venta real.**
 
+**Actualización 2026-10-16:** el proyecto usa la nueva experiencia AWS Projects y su región permitida es Ohio (`us-east-2`), no Virginia. ECR, rol runtime, logs y presupuesto de seguimiento ya están creados. El acceso OIDC está restringido por políticas administradas; no activar características avanzadas ni cambiar el plan para resolverlo. El estado de instalación y los bloqueos están en [aws-deployment-progress.md](aws-deployment-progress.md); las referencias posteriores a bootstrap pendiente describen el diseño original.
+
 [Artifact con iconos oficiales](artifacts/aws-ticketera.html) · [Funcionamiento SVG](artifacts/aws-runtime.svg) · [CI/CD SVG](artifacts/aws-delivery.svg).
 
 ## 1. Alcance acordado
